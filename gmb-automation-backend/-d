@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<pre>TypeError: Cannot destructure property &#39;profileId&#39; of &#39;req.body&#39; as it is undefined.<br> &nbsp; &nbsp;at /Users/alex/playwright1/gmb-automation-backend/index.cjs:134:13<br> &nbsp; &nbsp;at Layer.handleRequest (/Users/alex/playwright1/node_modules/router/lib/layer.js:152:17)<br> &nbsp; &nbsp;at next (/Users/alex/playwright1/node_modules/router/lib/route.js:157:13)<br> &nbsp; &nbsp;at jsonParser (/Users/alex/playwright1/node_modules/body-parser/lib/types/json.js:100:7)<br> &nbsp; &nbsp;at Layer.handleRequest (/Users/alex/playwright1/node_modules/router/lib/layer.js:152:17)<br> &nbsp; &nbsp;at next (/Users/alex/playwright1/node_modules/router/lib/route.js:157:13)<br> &nbsp; &nbsp;at Route.dispatch (/Users/alex/playwright1/node_modules/router/lib/route.js:117:3)<br> &nbsp; &nbsp;at handle (/Users/alex/playwright1/node_modules/router/index.js:435:11)<br> &nbsp; &nbsp;at Layer.handleRequest (/Users/alex/playwright1/node_modules/router/lib/layer.js:152:17)<br> &nbsp; &nbsp;at /Users/alex/playwright1/node_modules/router/index.js:295:15</pre>
+</body>
+</html>

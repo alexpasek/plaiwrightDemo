@@ -1,0 +1,43 @@
+``
+javascript
+// Assuming this code is inside your simulateGoogleSearch function
+
+const results = await page.$$("a h3");
+
+if (results.length > 0) {
+    const chosen = results[Math.floor(Math.random() * results.length)];
+
+    try {
+        // *** ADJUSTMENT START ***
+        // Wait for the chosen element to be visible and enabled before clicking
+        // Increased timeout to 60 seconds for more robustness
+        await chosen.waitForElementState('visible', { timeout: 60000 });
+        await chosen.waitForElementState('enabled', { timeout: 60000 });
+        // You might also consider 'stable' or 'clickable' state depending on your Playwright version and needs.
+        // 'visible' and 'enabled' are usually sufficient for clicking.
+
+        await chosen.click(); // Now attempt the click after waiting
+        // *** ADJUSTMENT END ***
+
+        // page.waitForTimeout is generally discouraged, prefer waiting for a condition
+        // await page.waitForTimeout(3000); // This can be removed or replaced with a wait for navigation or content
+
+        console.log(`🖱️ Clicked search result for "${searchQuery}"`);
+
+        // After clicking a link, the page will navigate. You should wait for the navigation to complete.
+        // This is more robust than a fixed timeout.
+        await page.waitForLoadState('domcontentloaded'); // Wait for the DOM to be loaded on the new page
+        // Or await page.waitForLoadState('networkidle'); // Wait until network activity is minimal
+        // Or await page.waitForURL('**/search?q=...', { timeout: 60000 }); // If you know the target URL pattern
+
+    } catch (error) {
+        // Catch the timeout error specifically for this click operation
+        console.error(`❌ Error clicking search result for "${searchQuery}":`, error.message);
+        // You might want to add logic here to handle the failure, e.g., take a screenshot, try the next result, or skip this search term.
+        // For now, we'll just log and let the loop continue if possible.
+        // If you want the script to stop on failure, you can re-throw the error: throw error;
+    }
+} else {
+    console.warn(`⚠️ No search results found for "${searchQuery}"`);
+    // Handle the case where no results were found, maybe try a different search term or skip.
+}
