@@ -1,0 +1,5 @@
+{
+    "ignore": [".env", "data/*.json", "data/uploads/*", "logs/*"],
+    "watch": ["server", "google-client.cjs", "index.cjs"],
+    "ext": "js,cjs,mjs,json"
+}

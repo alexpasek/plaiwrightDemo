@@ -13,3 +13,7 @@ allure-reports
 allure-report/
 allure-results/
 tests-examples/
+.env
+profiles.json
+tokens.json
+Gologi/
