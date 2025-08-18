@@ -1,5 +1,8 @@
+// google-client.cjs
 const { google } = require("googleapis");
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 require("dotenv").config();
 
 const oauth2Client = new google.auth.OAuth2(
@@ -8,30 +11,63 @@ const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_REDIRECT_URI
 );
 
-// Load saved tokens if available
+// Load saved tokens if available (no optional chaining)
 try {
-    const tokens = require("./data/tokens.json");
-    oauth2Client.setCredentials(tokens);
+    const tokensPath = path.join(__dirname, "data", "tokens.json");
+    if (fs.existsSync(tokensPath)) {
+        const raw = fs.readFileSync(tokensPath, "utf8");
+        const tokens = JSON.parse(raw);
+        oauth2Client.setCredentials(tokens);
+    } else {
+        console.log("No tokens found yet, start OAuth flow with /auth.");
+    }
 } catch (e) {
-    console.log("No tokens found yet, start OAuth flow.");
+    let msg;
+    if (e && e.message) {
+        msg = e.message;
+    } else {
+        msg = String(e);
+    }
+    console.log("Failed to read tokens.json:", msg);
 }
 
 /**
- * Helper to call Business Profile API with OAuth2 token
- * @param {string} method - HTTP method (GET, POST, PATCH, DELETE)
- * @param {string} url - Full API URL
- * @param {object} data - Request body
+ * Call Google Business APIs with explicit Bearer token.
+ * - no optional chaining
+ * - explicit checks
  */
-async function callBusinessProfileAPI(method, url, data = {}) {
-    const accessToken = (await oauth2Client.getAccessToken()).token;
+async function callBusinessProfileAPI(method, url, data) {
+    // Get access token (may be string or object with .token)
+    const tokenResp = await oauth2Client.getAccessToken();
+
+    let accessToken = null;
+    if (typeof tokenResp === "string") {
+        accessToken = tokenResp;
+    } else if (tokenResp && typeof tokenResp === "object") {
+        if (tokenResp.token && typeof tokenResp.token === "string") {
+            accessToken = tokenResp.token;
+        }
+    }
+
+    if (!accessToken) {
+        throw new Error(
+            "No access token available. Visit /auth to connect Google."
+        );
+    }
+
+    // Build headers
+    const headers = {};
+    headers["Authorization"] = "Bearer " + String(accessToken);
+
+    if (data !== undefined && data !== null) {
+        headers["Content-Type"] = "application/json";
+    }
+
     return axios({
-        method,
-        url,
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-        },
-        data,
+        method: method,
+        url: url,
+        data: data,
+        headers: headers,
     });
 }
 
