@@ -1,14 +1,12 @@
 // ==================== BOOTSTRAP ====================
 require("dotenv").config();
-const ATTACH_MEDIA =
-    String(process.env.POST_ATTACH_MEDIA || "").toLowerCase() === "true";
-
+const ATTACH_MEDIA = String(process.env.POST_ATTACH_MEDIA || "").toLowerCase() === "true";
+const cors = require("cors");
 const express = require("express");
 const app = express();
-const port = 4000; // default; smart binder may use PORT env or next free port
+const DEFAULT_PORT = Number(process.env.PORT || 4000);
 const fs = require("fs");
 const path = require("path");
-const axios = require("axios"); // optional
 const OpenAI = require("openai");
 
 // Routes (uploads/photos)
@@ -16,93 +14,31 @@ const uploadRoutes = require("./server/upload.cjs");
 
 // Google helpers
 const { oauth2Client, callBusinessProfileAPI } = require("./google-client.cjs");
-// ==================== APP CREATION: BASIC CONTROL ENDPOINTS ====================
-
-// Simple version endpoint for your UI
-app.get("/version", function(_req, res) {
-    res.json({
-        name: "gmb-automation-backend",
-        version: "0.1.0",
-        features: {
-            generatePost: true,
-            postNow: true,
-            postNowAll: true,
-            mediaAttach: ATTACH_MEDIA
-        }
-    });
-});
-
-// Post NOW for a single profile (optional postText/cta/linkUrl)
-// curl -s -X POST http://localhost:4000/post-now -H "Content-Type: application/json" -d '{"profileId":"popcorn-pro-1"}'
-app.post("/post-now", async function(req, res) {
-    try {
-        const b = req.body || {};
-        const profileId = b.profileId;
-        if (!profileId) return res.status(400).json({ error: "Missing profileId" });
-
-        const payload = {
-            profileId: profileId,
-            postText: b.postText || "",
-            cta: b.cta || "",
-            linkUrl: b.linkUrl || ""
-        };
-
-        const result = await postToGmb(payload);
-        res.json({ ok: true, result: result });
-    } catch (e) {
-        const msg = e && e.message ? e.message : String(e);
-        console.error("❌ /post-now failed:", msg);
-        res.status(500).json({ ok: false, error: msg });
-    }
-});
-
-// Post NOW for ALL saved profiles (text will be AI-generated per profile if not provided)
-// curl -s -X POST http://localhost:4000/post-now-all | jq .
-app.post("/post-now-all", async function(_req, res) {
-    try {
-        // Use the file-backed list to be in sync with UI saves
-        var all = [];
-        try { all = profilesStore.readAll(); } catch (_) {}
-        if (!Array.isArray(all) || all.length === 0) {
-            // fallback to PROFILES loaded at boot
-            all = Array.isArray(PROFILES) ? PROFILES : [];
-        }
-
-        if (all.length === 0) {
-            return res.status(400).json({ ok: false, error: "No profiles found" });
-        }
-
-        const results = [];
-        for (var i = 0; i < all.length; i++) {
-            const p = all[i];
-            if (!p || !p.profileId) continue;
-
-            try {
-                const r = await postToGmb({
-                    profileId: p.profileId,
-                    postText: "", // let AI generate if empty
-                    cta: "",
-                    linkUrl: ""
-                });
-                results.push({ profileId: p.profileId, ok: true, data: r });
-            } catch (errOne) {
-                const em = errOne && errOne.message ? errOne.message : String(errOne);
-                results.push({ profileId: p.profileId, ok: false, error: em });
-            }
-        }
-
-        res.json({ ok: true, count: results.length, results: results });
-    } catch (e) {
-        const msg = e && e.message ? e.message : String(e);
-        console.error("❌ /post-now-all failed:", msg);
-        res.status(500).json({ ok: false, error: msg });
-    }
-});
 
 // Data stores
 const profilesStore = require("./server/profile-store.cjs");
+const postsStore = require("./server/posts-store.cjs");
+const { makeScheduler } = require("./server/scheduler.cjs");
 
-// Express middleware
+// Allow the React dev server (localhost:3000 or 3001) to call the backend
+
+
+// Allow the React dev server to call the backend
+app.use(
+    cors({
+        origin: function(origin, cb) {
+            if (!origin) return cb(null, true); // curl/postman/no Origin
+            if (/^http:\/\/localhost(:\d+)?$/.test(origin)) return cb(null, true);
+            return cb(new Error("Not allowed by CORS: " + origin));
+        },
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization"],
+        credentials: false,
+    })
+);
+
+
+// Middleware
 app.use(express.json({ limit: "1mb" }));
 app.use(uploadRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "data", "uploads")));
@@ -255,7 +191,6 @@ function tryPickPhotoFromUploads() {
 }
 
 // ==================== GBP: ACCOUNTS & LOCATIONS ====================
-
 app.get("/accounts", async function(_req, res) {
     try {
         const url =
@@ -315,101 +250,39 @@ try {
     console.warn("Could not load profiles.json. Make sure it exists in /data.");
 }
 
-// ==================== Profiles CRUD ====================
+// ==================== Health / Version / Profiles ====================
+app.get("/health", function(_req, res) {
+    res.json({ ok: true, status: "healthy" });
+});
+app.get("/version", function(_req, res) {
+    res.json({
+        name: "gmb-automation-backend",
+        version: "0.0.0",
+        port: serverPort,
+        features: { profiles: true, scheduler: true, postNow: true },
+    });
+});
+
 
 app.get("/profiles", function(_req, res) {
     try {
-        const list = profilesStore.readAll();
-        res.json({ profiles: list });
+        let listFromStore = [];
+        try {
+            listFromStore = profilesStore.readAll();
+        } catch (_) {}
+        const out =
+            Array.isArray(PROFILES) && PROFILES.length > 0 ?
+            PROFILES :
+            Array.isArray(listFromStore) ?
+            listFromStore : [];
+        res.json({ profiles: out });
     } catch (e) {
         const msg = e && e.message ? e.message : String(e);
         res.status(500).json({ error: msg });
     }
 });
 
-app.post("/profiles", function(req, res) {
-    try {
-        const p = req.body;
-        if (!p ||
-            !p.profileId ||
-            !p.accountId ||
-            !p.locationId ||
-            !p.businessName
-        ) {
-            return res.status(400).json({
-                error: "Missing fields: profileId, accountId, locationId, businessName are required",
-            });
-        }
-        profilesStore.upsert(p);
-        res.json({ ok: true, profile: p });
-    } catch (e) {
-        const msg = e && e.message ? e.message : String(e);
-        res.status(500).json({ error: msg });
-    }
-});
-
-app.delete("/profiles/:profileId", function(req, res) {
-    try {
-        const id = req.params.profileId;
-        if (!id) return res.status(400).json({ error: "Missing profileId" });
-        profilesStore.remove(id);
-        res.json({ ok: true, deleted: id });
-    } catch (e) {
-        const msg = e && e.message ? e.message : String(e);
-        res.status(500).json({ error: msg });
-    }
-});
-
-app.get("/discovery/accounts-with-locations", async function(_req, res) {
-    try {
-        const accResp = await callBusinessProfileAPI(
-            "GET",
-            "https://mybusinessbusinessinformation.googleapis.com/v1/accounts"
-        );
-        let accounts = [];
-        if (accResp && accResp.data && accResp.data.accounts)
-            accounts = accResp.data.accounts;
-
-        const out = [];
-        for (let i = 0; i < accounts.length; i++) {
-            const acc = accounts[i];
-            let accountId = "";
-            if (acc && acc.name) {
-                const parts = acc.name.split("/");
-                if (parts.length === 2 && parts[0] === "accounts") accountId = parts[1];
-            }
-            if (accountId !== "") {
-                const url =
-                    "https://mybusinessbusinessinformation.googleapis.com/v1/accounts/" +
-                    accountId +
-                    "/locations" +
-                    "?readMask=name,title,languageCode,websiteUri,phoneNumbers,metadata&pageSize=100";
-                const locResp = await callBusinessProfileAPI("GET", url);
-                const locations =
-                    locResp && locResp.data && locResp.data.locations ?
-                    locResp.data.locations : [];
-
-                out.push({
-                    accountId: accountId,
-                    accountName: acc && acc.accountName ? acc.accountName : "",
-                    type: acc && acc.type ? acc.type : "",
-                    locations: locations,
-                });
-            }
-        }
-        res.json({ accounts: out });
-    } catch (e) {
-        const msg =
-            e && e.response && e.response.data ?
-            e.response.data :
-            e && e.message ?
-            e.message :
-            String(e);
-        res.status(500).json({ error: msg });
-    }
-});
-
-// ==================== AI POST GENERATION ====================
+// ==================== AI POST GENERATION (preview) ====================
 app.get("/generate-post-by-profile", async function(req, res) {
     const profileId = req.query.profileId;
     if (!profileId) return res.status(400).json({ error: "Missing profileId" });
@@ -429,7 +302,6 @@ app.get("/generate-post-by-profile", async function(req, res) {
             neighbourhood +
             "..."
         );
-
         const resultAI = await aiGenerateSummaryAndHashtags(
             profile,
             neighbourhood,
@@ -438,11 +310,9 @@ app.get("/generate-post-by-profile", async function(req, res) {
         const summaryAI = resultAI ? resultAI.summary : "";
         const hashtagsAI =
             resultAI && Array.isArray(resultAI.hashtags) ? resultAI.hashtags : [];
-
         if (!summaryAI) throw new Error("No summary returned from AI");
 
         let postText = summaryAI + "\n\n";
-
         if (profile.reviewsUrl)
             postText += "Reviews ➡️ " + profile.reviewsUrl + "\n";
         if (profile.serviceAreaUrl)
@@ -450,12 +320,10 @@ app.get("/generate-post-by-profile", async function(req, res) {
         if (profile.mapsUrl) postText += "Google Maps ➡️ " + profile.mapsUrl + "\n";
         if (profile.areaMapUrl)
             postText += "Area Map ➡️ " + profile.areaMapUrl + "\n";
-
         if (hashtagsAI && hashtagsAI.length > 0)
             postText += "\n" + hashtagsAI.join(" ");
 
         console.log("✅ Post generated for " + profile.businessName);
-
         return res.json({
             profileId: profile.profileId,
             businessName: profile.businessName,
@@ -504,83 +372,108 @@ app.get("/oauth2callback", async function(req, res) {
     }
 });
 
-// ==================== GOOGLE BUSINESS POSTING ====================
+// ==================== CORE POST LOGIC (reused by routes & scheduler) ====================
+async function postToGmb(body) {
+    const profileId = body.profileId;
+    let postText = body.postText || "";
+    const cta = body.cta || "";
+    const linkUrl = body.linkUrl || "";
+
+    const profile = PROFILES.find(function(p) {
+        return p && p.profileId === profileId;
+    });
+    if (!profile) throw new Error("Profile not found");
+
+    // Pick photo
+    let chosenPhoto = tryPickPhotoFromProfile(profile);
+    if (!chosenPhoto) chosenPhoto = tryPickPhotoFromUploads();
+
+    // Generate text if needed
+    let generatedHashtags = [];
+    if (!postText) {
+        const nbh = pickNeighbourhood(profile, new Date());
+        const gen = await aiGenerateSummaryAndHashtags(profile, nbh, openai);
+        postText = gen && gen.summary ? gen.summary : "";
+        generatedHashtags = gen && Array.isArray(gen.hashtags) ? gen.hashtags : [];
+    }
+
+    // Append links + hashtags
+    let summary = String(postText || "").trim();
+    if (profile.reviewsUrl) summary += "\n\nReviews ➡️ " + profile.reviewsUrl;
+    if (profile.serviceAreaUrl)
+        summary += "\nService Area ➡️ " + profile.serviceAreaUrl;
+    if (profile.mapsUrl) summary += "\nGoogle Maps ➡️ " + profile.mapsUrl;
+    if (profile.areaMapUrl) summary += "\nArea Map ➡️ " + profile.areaMapUrl;
+
+    if (generatedHashtags.length > 0) {
+        const spaceLeft = 1450 - summary.length;
+        if (spaceLeft > 20) {
+            const tagLine = safeJoinHashtags(generatedHashtags, spaceLeft);
+            if (tagLine && summary.length + 2 + tagLine.length <= 1450)
+                summary += "\n\n" + tagLine;
+        }
+    }
+    if (summary.length > 1500) summary = summary.slice(0, 1500);
+
+    // Build GBP payload
+    const parent =
+        "accounts/" + profile.accountId + "/locations/" + profile.locationId;
+    const url = "https://mybusiness.googleapis.com/v4/" + parent + "/localPosts";
+
+    const payload = {
+        languageCode: "en",
+        topicType: "STANDARD",
+        summary: summary,
+    };
+    if (cta && linkUrl) payload.callToAction = { actionType: cta, url: linkUrl };
+
+    if (chosenPhoto && chosenPhoto.url) {
+        // note: GBP requires public https; we'll still attach only if allowed + public
+        const absLocal = "http://localhost:" + serverPort + chosenPhoto.url;
+        if (shouldAttachMedia(absLocal)) {
+            payload.media = [{ mediaFormat: "PHOTO", sourceUrl: absLocal }];
+        }
+    }
+
+    const result = await callBusinessProfileAPI("POST", url, payload);
+
+    // persist a history record
+    try {
+        postsStore.append({
+            profileId: profileId,
+            accountId: profile.accountId,
+            locationId: profile.locationId,
+            summary: summary,
+            usedImage: payload.media ? (chosenPhoto ? chosenPhoto.url : null) : null,
+            gmbPostId: result && result.data && result.data.name ? result.data.name : null,
+            status: "POSTED",
+            createdAt: new Date().toISOString(),
+        });
+    } catch (_) {}
+
+    return {
+        data: result.data,
+        usedImage: payload.media ? (chosenPhoto ? chosenPhoto.url : null) : null,
+    };
+}
+
+// ==================== POST ROUTES (used by frontend) ====================
 app.post("/post-to-gmb", async function(req, res) {
     try {
         const body = req.body || {};
-        const profileId = body.profileId;
-        let postText = body.postText || "";
-        const cta = body.cta || "";
-        const linkUrl = body.linkUrl || "";
-
-        if (!profileId) return res.status(400).json({ error: "Missing profileId" });
-
-        const profile = PROFILES.find(function(p) {
-            return p && p.profileId === profileId;
+        if (!body.profileId)
+            return res.status(400).json({ error: "Missing profileId" });
+        const r = await postToGmb({
+            profileId: body.profileId,
+            postText: body.postText || "",
+            cta: body.cta || "",
+            linkUrl: body.linkUrl || "",
         });
-        if (!profile) return res.status(404).json({ error: "Profile not found" });
-
-        // ----- pick photo candidates (but attach only if allowed) -----
-        let chosenPhoto = tryPickPhotoFromProfile(profile);
-        if (!chosenPhoto) chosenPhoto = tryPickPhotoFromUploads();
-
-        // ----- text + hashtags (on-demand) -----
-        let generatedHashtags = [];
-        if (!postText) {
-            const nbh = pickNeighbourhood(profile, new Date());
-            const gen = await aiGenerateSummaryAndHashtags(profile, nbh, openai);
-            postText = gen && gen.summary ? gen.summary : "";
-            generatedHashtags =
-                gen && Array.isArray(gen.hashtags) ? gen.hashtags : [];
-        }
-
-        // ----- append links + hashtags and enforce limit -----
-        let summary = String(postText || "").trim();
-        if (profile.reviewsUrl) summary += "\n\nReviews ➡️ " + profile.reviewsUrl;
-        if (profile.serviceAreaUrl)
-            summary += "\nService Area ➡️ " + profile.serviceAreaUrl;
-        if (profile.mapsUrl) summary += "\nGoogle Maps ➡️ " + profile.mapsUrl;
-        if (profile.areaMapUrl) summary += "\nArea Map ➡️ " + profile.areaMapUrl;
-
-        if (generatedHashtags.length > 0) {
-            const spaceLeft = 1450 - summary.length;
-            if (spaceLeft > 20) {
-                const tagLine = safeJoinHashtags(generatedHashtags, spaceLeft);
-                if (tagLine && summary.length + 2 + tagLine.length <= 1450) {
-                    summary += "\n\n" + tagLine;
-                }
-            }
-        }
-        if (summary.length > 1500) summary = summary.slice(0, 1500);
-
-        // ----- build payload -----
-        const parent =
-            "accounts/" + profile.accountId + "/locations/" + profile.locationId;
-        const url =
-            "https://mybusiness.googleapis.com/v4/" + parent + "/localPosts";
-
-        const payload = {
-            languageCode: "en",
-            topicType: "STANDARD",
-            summary: summary,
-        };
-        if (cta && linkUrl)
-            payload.callToAction = { actionType: cta, url: linkUrl };
-
-        if (chosenPhoto && chosenPhoto.url) {
-            const absFromReq =
-                req.protocol + "://" + req.get("host") + chosenPhoto.url;
-            if (shouldAttachMedia(absFromReq)) {
-                payload.media = [{ mediaFormat: "PHOTO", sourceUrl: absFromReq }];
-            }
-        }
-
-        const result = await callBusinessProfileAPI("POST", url, payload);
         res.json({
             success: true,
-            data: result.data,
-            usedPhoto: payload.media ? chosenPhoto : null,
-            mediaAttached: Boolean(payload.media),
+            data: r.data,
+            usedPhoto: r.usedImage ? { url: r.usedImage } : null,
+            mediaAttached: !!r.usedImage,
             mediaFeatureEnabled: ATTACH_MEDIA,
         });
     } catch (err) {
@@ -595,6 +488,184 @@ app.post("/post-to-gmb", async function(req, res) {
     }
 });
 
+app.post("/post-now", async function(req, res) {
+    try {
+        const body = req.body || {};
+        if (!body.profileId)
+            return res.status(400).json({ error: "Missing profileId" });
+        const r = await postToGmb({
+            profileId: body.profileId,
+            postText: body.postText || "",
+            cta: body.cta || "",
+            linkUrl: body.linkUrl || "",
+        });
+        LAST_RUN_MAP[body.profileId] = new Date().toISOString();
+        res.json({ ok: true, data: r.data });
+    } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        res.status(500).json({ error: msg });
+    }
+});
+
+app.post("/post-now-all", async function(_req, res) {
+    try {
+        const results = [];
+        let count = 0;
+        for (let i = 0; i < PROFILES.length; i++) {
+            const p = PROFILES[i];
+            if (!p || !p.profileId) continue;
+            try {
+                const r = await postToGmb({ profileId: p.profileId, postText: "" });
+                LAST_RUN_MAP[p.profileId] = new Date().toISOString();
+                results.push({ profileId: p.profileId, ok: true, data: r.data });
+                count++;
+            } catch (e) {
+                results.push({
+                    profileId: p.profileId,
+                    ok: false,
+                    error: e && e.message ? e.message : String(e),
+                });
+            }
+        }
+        res.json({ ok: true, count: count, results: results });
+    } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        res.status(500).json({ error: msg });
+    }
+});
+
+// ==================== SCHEDULER API (simple in-memory state) ====================
+const DEFAULT_SCHED = {
+    enabled: false,
+    defaultTime: "10:00",
+    tickSeconds: 30,
+    perProfileTimes: {},
+};
+let SCHED_CFG = Object.assign({}, DEFAULT_SCHED);
+const LAST_RUN_MAP = {}; // { profileId: ISOString }
+
+app.get("/scheduler/config", function(_req, res) {
+    res.json(SCHED_CFG);
+});
+
+app.put("/scheduler/config", function(req, res) {
+    try {
+        const body = req.body || {};
+        SCHED_CFG.enabled = !!body.enabled;
+        if (
+            typeof body.defaultTime === "string" &&
+            /^\d{2}:\d{2}$/.test(body.defaultTime)
+        ) {
+            SCHED_CFG.defaultTime = body.defaultTime;
+        }
+        if (typeof body.tickSeconds === "number" && body.tickSeconds > 0) {
+            SCHED_CFG.tickSeconds = body.tickSeconds;
+        }
+        const ppt = body.perProfileTimes || {};
+        if (ppt && typeof ppt === "object") {
+            const cleaned = {};
+            const keys = Object.keys(ppt);
+            for (let i = 0; i < keys.length; i++) {
+                const k = keys[i];
+                const v = String(ppt[k] || "");
+                if (/^\d{2}:\d{2}$/.test(v)) cleaned[k] = v;
+            }
+            SCHED_CFG.perProfileTimes = cleaned;
+        }
+        res.json({ ok: true, config: SCHED_CFG });
+    } catch (e) {
+        res.status(400).json({ error: e && e.message ? e.message : String(e) });
+    }
+});
+
+app.get("/scheduler/status", function(_req, res) {
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const profiles = (Array.isArray(PROFILES) ? PROFILES : []).map(function(p) {
+        const hhmm =
+            (SCHED_CFG.perProfileTimes && SCHED_CFG.perProfileTimes[p.profileId]) ||
+            SCHED_CFG.defaultTime;
+        const lastRunISODate = LAST_RUN_MAP[p.profileId] || null;
+        const willRunToday = !!SCHED_CFG.enabled;
+        return {
+            profileId: p.profileId,
+            businessName: p.businessName || "",
+            scheduledTime: hhmm,
+            lastRunISODate: lastRunISODate,
+            willRunToday: willRunToday,
+        };
+    });
+    res.json({
+        enabled: SCHED_CFG.enabled,
+        defaultTime: SCHED_CFG.defaultTime,
+        tickSeconds: SCHED_CFG.tickSeconds,
+        todayISO: todayISO,
+        profiles: profiles,
+    });
+});
+
+app.post("/scheduler/run-once", async function(_req, res) {
+    try {
+        const results = [];
+        for (let i = 0; i < PROFILES.length; i++) {
+            const p = PROFILES[i];
+            if (!p || !p.profileId) continue;
+            try {
+                const r = await postToGmb({ profileId: p.profileId, postText: "" });
+                LAST_RUN_MAP[p.profileId] = new Date().toISOString();
+                results.push({ profileId: p.profileId, ok: true, data: r.data });
+            } catch (e) {
+                results.push({
+                    profileId: p.profileId,
+                    ok: false,
+                    error: e && e.message ? e.message : String(e),
+                });
+            }
+        }
+        res.json({ ok: true, results: results });
+    } catch (err) {
+        res
+            .status(500)
+            .json({ error: err && err.message ? err.message : String(err) });
+    }
+});
+
+app.post("/scheduler/run-now/:profileId", async function(req, res) {
+    try {
+        const id = req.params.profileId;
+        if (!id) return res.status(400).json({ error: "Missing profileId" });
+        const r = await postToGmb({ profileId: id, postText: "" });
+        LAST_RUN_MAP[id] = new Date().toISOString();
+        res.json({ ok: true, data: r.data });
+    } catch (err) {
+        res
+            .status(500)
+            .json({ error: err && err.message ? err.message : String(err) });
+    }
+});
+
+// ==================== POSTS HISTORY ====================
+app.get("/posts/history", function(req, res) {
+    const qProfileId = req.query.profileId || "";
+    const qLimit = parseInt(req.query.limit || "50", 10);
+
+    try {
+        let items = [];
+        if (postsStore && typeof postsStore.readLatest === "function") {
+            items = postsStore.readLatest(qProfileId || null, qLimit);
+        } else if (postsStore && typeof postsStore.readAll === "function") {
+            items = postsStore.readAll();
+            if (qProfileId)
+                items = items.filter(function(x) {
+                    return x && x.profileId === qProfileId;
+                });
+            items = items.slice(-qLimit);
+        }
+        res.json({ items: Array.isArray(items) ? items : [] });
+    } catch (_) {
+        res.json({ items: [] });
+    }
+});
+
 // ==================== ROOT ====================
 app.get("/", function(_req, res) {
     res.send(
@@ -602,196 +673,49 @@ app.get("/", function(_req, res) {
     );
 });
 
-// ===== Scheduler hookup (after all routes & helpers are defined) =====
-const postsStore = require("./server/posts-store.cjs");
-const { makeScheduler } = require("./server/scheduler.cjs");
+// ==================== SERVER LIFECYCLE ====================
+let server = null;
+let serverPort = Number(process.env.PORT || 4000);
 
-// expose a thin wrapper so scheduler can call the same logic as /post-to-gmb
-async function postToGmb(body) {
-    const profileId = body.profileId;
-    let postText = body.postText || "";
-    const cta = body.cta || "";
-    const linkUrl = body.linkUrl || "";
+// simple auto-pick logic: try requested port; if busy, try +1, up to +10
+function tryListen(startPort, maxAttempts, cb) {
+    let attempt = 0;
 
-    const profile = PROFILES.find(function(p) {
-        return p && p.profileId === profileId;
-    });
-    if (!profile) throw new Error("Profile not found");
-
-    let chosenPhoto = tryPickPhotoFromProfile(profile);
-    if (!chosenPhoto) chosenPhoto = tryPickPhotoFromUploads();
-
-    let generatedHashtags = [];
-    if (postText === "") {
-        const nbh = pickNeighbourhood(profile, new Date());
-        const gen = await aiGenerateSummaryAndHashtags(profile, nbh, openai);
-        postText = gen && gen.summary ? gen.summary : "";
-        generatedHashtags = gen && Array.isArray(gen.hashtags) ? gen.hashtags : [];
-    }
-
-    let summary = String(postText || "").trim();
-    if (profile.reviewsUrl) summary += "\n\nReviews ➡️ " + profile.reviewsUrl;
-    if (profile.serviceAreaUrl)
-        summary += "\nService Area ➡️ " + profile.serviceAreaUrl;
-    if (profile.mapsUrl) summary += "\nGoogle Maps ➡️ " + profile.mapsUrl;
-    if (profile.areaMapUrl) summary += "\nArea Map ➡️ " + profile.areaMapUrl;
-
-    if (generatedHashtags.length > 0) {
-        const spaceLeft = 1450 - summary.length;
-        if (spaceLeft > 20) {
-            const tagLine = safeJoinHashtags(generatedHashtags, spaceLeft);
-            if (tagLine && summary.length + 2 + tagLine.length <= 1450) {
-                summary += "\n\n" + tagLine;
-            }
-        }
-    }
-    if (summary.length > 1500) summary = summary.slice(0, 1500);
-
-    const parent =
-        "accounts/" + profile.accountId + "/locations/" + profile.locationId;
-    const url = "https://mybusiness.googleapis.com/v4/" + parent + "/localPosts";
-    const payload = {
-        languageCode: "en",
-        topicType: "STANDARD",
-        summary: summary,
-    };
-
-    if (cta && linkUrl) payload.callToAction = { actionType: cta, url: linkUrl };
-
-    if (chosenPhoto && chosenPhoto.url) {
-        // This uses localhost (non-https) so shouldAttachMedia will reject attaching,
-        // which is correct unless you provide a public https image.
-        const absUrl = "http://localhost:" + port + chosenPhoto.url;
-        if (shouldAttachMedia(absUrl)) {
-            payload.media = [{ mediaFormat: "PHOTO", sourceUrl: absUrl }];
-        }
-    }
-
-    const result = await callBusinessProfileAPI("POST", url, payload);
-
-    postsStore.append({
-        profileId: profileId,
-        accountId: profile.accountId,
-        locationId: profile.locationId,
-        summary: summary,
-        usedImage: payload.media ? (chosenPhoto ? chosenPhoto.url : null) : null,
-        gmbPostId: result && result.data && result.data.name ? result.data.name : null,
-        status: "POSTED",
-    });
-
-    return {
-        data: result.data,
-        usedImage: payload.media ? (chosenPhoto ? chosenPhoto.url : null) : null,
-    };
-}
-
-makeScheduler({
-    app: app,
-    postToGmb: postToGmb,
-    pickNeighbourhood: pickNeighbourhood,
-    profilesRef: function() {
-        return PROFILES;
-    },
-});
-
-// ==================== HEALTH ENDPOINT ====================
-app.get("/health", function(_req, res) {
-    res.json({ ok: true, status: "up" });
-});
-
-// ==================== SERVER LIFECYCLE & SMART PORT BIND ====================
-const net = require("net");
-
-function findAvailablePort(startPort, cb) {
-    function tryPort(p) {
-        const tester = net
-            .createServer()
-            .once("error", function(err) {
-                if (err && err.code === "EADDRINUSE") {
-                    tryPort(p + 1);
-                } else {
-                    cb(err, null);
-                }
-            })
-            .once("listening", function() {
-                tester.close(function() {
-                    cb(null, p);
-                });
-            })
-            .listen(p);
-        tester.unref();
-    }
-    tryPort(startPort);
-}
-
-var preferredPort = 4000;
-if (process && process.env && process.env.PORT) {
-    var parsed = parseInt(process.env.PORT, 10);
-    if (!isNaN(parsed) && parsed > 0) preferredPort = parsed;
-}
-
-findAvailablePort(preferredPort, function(err, chosenPort) {
-    if (err) {
-        console.error("💥 Could not find free port:", err);
-        process.exit(1);
-        return;
-    }
-
-    const server = app.listen(chosenPort, function() {
-        console.log(
-            "🚀 Backend running at http://localhost:" +
-            chosenPort +
-            " (requested " +
-            preferredPort +
-            ")"
-        );
-    });
-
-    server.on("close", function() {
-        console.log("🔌 HTTP server closed");
-    });
-    server.on("error", function(err) {
-        console.error(
-            "💥 HTTP server error:",
-            err && err.message ? err.message : String(err)
-        );
-    });
-
-    // Optional keepalive if your environment closes stdio
-    if (String(process.env.FORCE_KEEPALIVE || "").toLowerCase() === "true") {
-        try {
-            process.stdin.resume();
-            console.log("⏳ FORCE_KEEPALIVE active (stdin held open)");
-        } catch (_) {}
-    }
-
-    function shutdown(sig) {
-        console.log("🛑 " + sig + " received, closing server…");
-        server.close(function() {
-            console.log("✅ Server closed, exiting.");
-            process.exit(0);
+    function start() {
+        const p = startPort + attempt;
+        const s = app.listen(p, function() {
+            server = s;
+            serverPort = p;
+            console.log("🚀 Backend running at http://localhost:" + p + " (requested " + (process.env.PORT || 4000) + ")");
+            cb(null, s, p);
         });
-        setTimeout(function() {
-            console.log("⏱️ Force exit after timeout.");
-            process.exit(0);
-        }, 3000).unref();
+        s.on("error", function(err) {
+            if (err && err.code === "EADDRINUSE" && attempt < maxAttempts) {
+                attempt += 1;
+                console.warn("⚠️ Port " + p + " is busy, trying " + (startPort + attempt) + "...");
+                start();
+            } else {
+                cb(err || new Error("Failed to bind port"), null, null);
+            }
+        });
     }
-    process.on("SIGINT", function() {
-        shutdown("SIGINT");
-    });
-    process.on("SIGTERM", function() {
-        shutdown("SIGTERM");
-    });
-    process.on("exit", function(code) {
-        console.log("👋 Process exit with code:", code);
-    });
-    process.on("uncaughtException", function(err) {
-        console.error(
-            "⚠️ Uncaught Exception:",
-            err && err.stack ? err.stack : String(err)
-        );
-    });
-    process.on("unhandledRejection", function(reason) {
-        console.error("⚠️ Unhandled Rejection:", String(reason));
-    });
+    start();
+}
+
+tryListen(serverPort, 10, function(err) {
+    if (err) {
+        console.error("💥 HTTP server error:", err && err.message ? err.message : String(err));
+        process.exit(1);
+    }
+});
+
+// helpful logs if something is closing the server
+process.on("exit", function(code) { console.log("👋 Process exit with code:", code); });
+process.on("SIGINT", function() { console.log("🛑 SIGINT received"); });
+process.on("SIGTERM", function() { console.log("🛑 SIGTERM received"); });
+process.on("uncaughtException", function(err) {
+    console.error("⚠️ Uncaught Exception:", err && err.stack ? err.stack : String(err));
+});
+process.on("unhandledRejection", function(reason) {
+    console.error("⚠️ Unhandled Rejection:", String(reason));
 });
