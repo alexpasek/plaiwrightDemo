@@ -1,37 +1,31 @@
-import React from "react";
-import { getApiBase, getHealth } from "../lib/api";
+import React, { useEffect, useState } from "react";
+import { getApiBase } from "../lib/api";
 
 export default function BackendBadge() {
-  const [url, setUrl] = React.useState("");
-  const [ok, setOk] = React.useState(false);
+  const [base, setBase] = useState("");
+  const [ok, setOk] = useState(null);
 
-  React.useEffect(() => {
-    (async function run() {
-      const u = await getApiBase();
-      setUrl(u);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
       try {
-        const h = await getHealth();
-        setOk(!!(h && h.ok));
-      } catch (_e) {
-        setOk(false);
+        const b = await getApiBase();
+        if (alive) setBase(b);
+        const r = await fetch(b + "/health").catch(() => null);
+        if (alive) setOk(!!(r && r.ok));
+      } catch (_) {
+        if (alive) setOk(false);
       }
     })();
+    return () => {
+      alive = false;
+    };
   }, []);
 
+  const txt = ok === null ? "Checking…" : ok ? "Backend OK" : "Backend DOWN";
   return (
-    <div
-      style={{
-        padding: 8,
-        border: "1px solid #ccc",
-        borderRadius: 8,
-        margin: "8px 0",
-        display: "inline-block",
-      }}
-    >
-      <div>
-        <strong>Backend:</strong> {url || "discovering..."}
-      </div>
-      <div>Status: {ok ? "✅ OK" : "❌ DOWN"}</div>
-    </div>
+    <span className="badge" title={base} style={{ marginLeft: 12 }}>
+      {txt}
+    </span>
   );
 }

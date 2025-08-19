@@ -187,3 +187,32 @@ thead th {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+
+/* Layout tune-up */
+
+.grid.g3 {
+    display: grid;
+    grid-template-columns: 400px 1fr 400px;
+    /* wider left, roomy right */
+    gap: 16px;
+}
+
+.card textarea {
+    min-height: 240px;
+}
+
+.card select,
+.card input[type="text"],
+.card input[type="url"],
+.card input[type="number"] {
+    width: 100%;
+}
+
+
+/* keep tables scrollable but not tiny */
+
+.scroll {
+    max-height: 420px;
+    overflow: auto;
+}

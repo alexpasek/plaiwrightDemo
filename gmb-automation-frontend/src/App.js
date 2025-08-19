@@ -3,13 +3,30 @@ import api from "./lib/api";
 import "./App.css";
 import BackendBadge from "./components/BackendBadge";
 
+const CTA_OPTIONS = [
+  { value: "CALL_NOW", label: "Call now (tel:+)" },
+  { value: "LEARN_MORE", label: "Learn more" },
+  { value: "BOOK", label: "Book" },
+  { value: "ORDER", label: "Order" },
+  { value: "SHOP", label: "Shop" },
+  { value: "SIGN_UP", label: "Sign up" },
+];
+
 export default function App() {
   const [health, setHealth] = useState(null);
   const [version, setVersion] = useState(null);
   const [profiles, setProfiles] = useState([]);
   const [selectedId, setSelectedId] = useState("");
+
+  // composer
   const [preview, setPreview] = useState("");
   const [postText, setPostText] = useState("");
+
+  // new CTA+Link+Media controls
+  const [cta, setCta] = useState("CALL_NOW");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
+
   const [schedStatus, setSchedStatus] = useState(null);
   const [schedConfig, setSchedConfig] = useState(null);
   const [hist, setHist] = useState(null);
@@ -39,6 +56,7 @@ export default function App() {
       setVersion(v);
       const list = Array.isArray(pr?.profiles) ? pr.profiles : [];
       setProfiles(list);
+      // pick first profile
       if (list[0]?.profileId) setSelectedId(list[0].profileId);
       setSchedConfig(sc);
       setSchedStatus(ss);
@@ -48,14 +66,19 @@ export default function App() {
   }
 
   useEffect(() => {
-    bootstrap();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    bootstrap(); /* eslint-disable-next-line */
   }, []);
 
+  // When profile changes, prefill CTA/link/media from defaults
   useEffect(() => {
+    const p = selectedProfile;
+    const d = (p && p.defaults) || {};
+    setCta(d.cta || "CALL_NOW");
+    setLinkUrl(d.linkUrl || p?.landingUrl || "");
+    setMediaUrl(d.mediaUrl || "");
     if (selectedId) refreshHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  }, [selectedId, selectedProfile?.defaults]);
 
   async function doPreview() {
     if (!selectedId) return notify("Select a profile first");
@@ -75,11 +98,48 @@ export default function App() {
     }
   }
 
+  function validateBeforePost() {
+    if (cta !== "CALL_NOW") {
+      if (!/^https?:\/\//i.test(linkUrl || "")) {
+        notify("For this CTA, please provide a valid https:// link.");
+        return false;
+      }
+    } else {
+      // CALL_NOW can be blank (backend uses Google phone), OR tel:+
+      if (
+        linkUrl &&
+        !/^tel:/i.test(linkUrl) &&
+        !/^https?:\/\//i.test(linkUrl)
+      ) {
+        notify("For Call now, leave link empty OR use tel:+1...");
+        return false;
+      }
+    }
+    if (mediaUrl && !/^https:\/\/.+\.(png|jpe?g|webp)$/i.test(mediaUrl)) {
+      notify("Media must be a public HTTPS image (.png/.jpg/.jpeg/.webp).");
+      return false;
+    }
+    return true;
+  }
+
   async function doPostNow() {
     if (!selectedId) return notify("Select a profile first");
+    if (!validateBeforePost()) return;
     setBusy(true);
     try {
-      await api.postNow(selectedId, postText);
+      // Call backend directly with extended payload (keeps your existing api.js intact)
+      const r = await fetch("http://localhost:4000/post-now", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profileId: selectedId,
+          postText,
+          cta,
+          linkUrl,
+          mediaUrl,
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
       notify("Posted!");
       await refreshHistory();
     } catch (e) {
@@ -184,6 +244,31 @@ export default function App() {
     }
   }
 
+  // Update profile defaults inline (PATCH /profiles/:id/defaults)
+  async function saveProfileDefaults() {
+    if (!selectedProfile) return;
+    try {
+      const r = await fetch(
+        `http://localhost:4000/profiles/${encodeURIComponent(
+          selectedProfile.profileId
+        )}/defaults`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cta, linkUrl, mediaUrl }),
+        }
+      );
+      if (!r.ok) throw new Error(await r.text());
+      notify("Defaults saved");
+      // Refresh profiles to reflect new defaults
+      const pr = await api.getProfiles();
+      const list = Array.isArray(pr?.profiles) ? pr.profiles : [];
+      setProfiles(list);
+    } catch (e) {
+      notify(e.message || "Save defaults failed");
+    }
+  }
+
   return (
     <>
       <header className="bar">
@@ -214,6 +299,7 @@ export default function App() {
                 </option>
               ))}
             </select>
+
             <div className="row" style={{ marginTop: 12 }}>
               <button className="btn blue" onClick={doPreview}>
                 Generate Preview
@@ -222,6 +308,7 @@ export default function App() {
                 Post Now
               </button>
             </div>
+
             <button
               className="btn"
               style={{ width: "100%", marginTop: 12 }}
@@ -230,6 +317,54 @@ export default function App() {
             >
               Post Now — All Profiles
             </button>
+
+            <div className="box" style={{ marginTop: 12 }}>
+              <div className="small" style={{ marginBottom: 6 }}>
+                Action Button
+              </div>
+              <select
+                value={cta}
+                onChange={(e) => setCta(e.target.value)}
+                style={{ width: "100%" }}
+              >
+                {CTA_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+
+              <div className="row" style={{ marginTop: 8, gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div className="small">Link (required unless “Call now”)</div>
+                  <input
+                    value={linkUrl}
+                    onChange={(e) => setLinkUrl(e.target.value)}
+                    placeholder="https://your-site/page  — or tel:+1..."
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                <div className="small">Photo URL (https image)</div>
+                <input
+                  value={mediaUrl}
+                  onChange={(e) => setMediaUrl(e.target.value)}
+                  placeholder="https://.../image.jpg"
+                />
+              </div>
+
+              <div className="row" style={{ marginTop: 8 }}>
+                <button className="btn gray" onClick={saveProfileDefaults}>
+                  Save as Profile Defaults
+                </button>
+              </div>
+              <p className="muted" style={{ marginTop: 8 }}>
+                CALL_NOW may leave Link blank — backend uses the Google phone.
+                Non-CALL_NOW CTAs need a valid https:// URL.
+              </p>
+            </div>
+
             <p className="muted">
               Tip: you can edit the preview text before posting.
             </p>
