@@ -44,13 +44,21 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ==================== HELPERS ====================
 function pickNeighbourhood(profile, date) {
-    const p = profile || {};
-    const arr = Array.isArray(p.neighbourhoods) ? p.neighbourhoods : [];
-    if (arr.length === 0) return p.city || "";
-    const d = date || new Date();
-    const idx = (d.getDate() - 1) % arr.length;
+    var p = profile || {};
+    var arr = Array.isArray(p.neighbourhoods) ? p.neighbourhoods : [];
+    var city = p.city || "";
+    if (arr.length === 0) return city;
+
+    // More variety:
+    //  - 30% of the time use the city only
+    //  - otherwise pick a random neighbourhood
+    var useCityOnly = Math.random() < 0.3;
+    if (useCityOnly) return city;
+
+    var idx = Math.floor(Math.random() * arr.length);
     return arr[idx];
 }
+
 
 function safeJoinHashtags(arr, maxChars) {
     if (!Array.isArray(arr)) return "";
@@ -88,20 +96,55 @@ async function aiGenerateSummaryAndHashtags(
     neighbourhood,
     openaiClient
 ) {
-    const city = profile && profile.city ? profile.city : "";
-    const businessName =
+    var city = profile && profile.city ? profile.city : "";
+    var businessName =
         profile && profile.businessName ? profile.businessName : "";
-    const keywords = Array.isArray(profile && profile.keywords) ?
-        profile.keywords : [];
-    const kwLine = keywords.join(", ");
-    const where =
-        neighbourhood && neighbourhood !== "" ? neighbourhood + ", " + city : city;
+    var keywords = Array.isArray(profile && profile.keywords) ?
+        profile.keywords :
+        [];
+    var kwLine = keywords.join(", ");
 
-    const prompt =
+    // Randomize the way we mention the area
+    var area = neighbourhood && neighbourhood !== "" ? neighbourhood : "";
+    var whereOptions = area ?
+        [
+            area + ", " + city,
+            "the " + area + " area of " + city,
+            area + " in " + city,
+            city + " — including " + area,
+            area + " / " + city,
+        ] :
+        [city];
+    var where = whereOptions[Math.floor(Math.random() * whereOptions.length)];
+
+    // Random tone + CTA to reduce repetition
+    var tones = [
+        "friendly and helpful",
+        "confident and professional",
+        "warm and community-focused",
+        "concise and action-oriented",
+        "benefit-driven and practical",
+    ];
+    var tone = tones[Math.floor(Math.random() * tones.length)];
+
+    var ctas = [
+        "Request a free quote today.",
+        "Get your free estimate now.",
+        "Message us for a free estimate.",
+        "Book a free quote today.",
+        "Contact us for a no-obligation quote.",
+    ];
+    var ctaLine = ctas[Math.floor(Math.random() * ctas.length)];
+
+    var prompt =
         "Return ONLY valid JSON with fields: summary (string), hashtags (array of 5-7 strings). " +
         "Do not include markdown fences. " +
-        "Constraints: summary 80-120 words, friendly, benefit-focused, no phone numbers, no emojis in body, no hashtags in body. " +
-        "Mention location and natural local SEO phrases. End body with a clear CTA to request a free quote today. " +
+        "Constraints: summary 80-120 words, " +
+        tone +
+        ", no phone numbers, no emojis in body, no hashtags in body. " +
+        "Mention the location naturally. End the body with EXACTLY this CTA: " +
+        ctaLine +
+        " " +
         "Hashtags should be concise, readable, and include a mix of general and geo hashtags (no punctuation except '#').\n\n" +
         "Business: " +
         businessName +
@@ -113,13 +156,13 @@ async function aiGenerateSummaryAndHashtags(
         kwLine +
         "\n";
 
-    const completion = await openaiClient.chat.completions.create({
+    var completion = await openaiClient.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
+        temperature: 0.9,
     });
 
-    let txt = "";
+    var txt = "";
     if (
         completion &&
         completion.choices &&
@@ -130,20 +173,21 @@ async function aiGenerateSummaryAndHashtags(
         txt = completion.choices[0].message.content;
     }
 
-    const obj = parseJsonResponse(txt);
+    var obj = parseJsonResponse(txt);
     if (!obj) return { summary: String(txt || "").trim(), hashtags: [] };
 
-    const summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
-    const hashtags = Array.isArray(obj.hashtags) ? obj.hashtags : [];
-    const cleaned = [];
-    for (let i = 0; i < hashtags.length; i++) {
-        let h = String(hashtags[i] || "").trim();
+    var summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
+    var hashtags = Array.isArray(obj.hashtags) ? obj.hashtags : [];
+    var cleaned = [];
+    for (var i = 0; i < hashtags.length; i++) {
+        var h = String(hashtags[i] || "").trim();
         if (h === "") continue;
         if (h[0] !== "#") h = "#" + h.replace(/^#+/, "");
         cleaned.push(h);
     }
-    return { summary, hashtags: cleaned };
+    return { summary: summary, hashtags: cleaned };
 }
+
 
 // ---- URL / media helpers ----
 function isPublicHttps(url) {
