@@ -2,6 +2,7 @@
 require("dotenv").config();
 const ATTACH_MEDIA =
     String(process.env.POST_ATTACH_MEDIA || "").toLowerCase() === "true";
+
 const cors = require("cors");
 const express = require("express");
 const app = express();
@@ -43,22 +44,22 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ==================== HELPERS ====================
 function pickNeighbourhood(profile, date) {
-    var p = profile || {};
-    var arr = Array.isArray(p.neighbourhoods) ? p.neighbourhoods : [];
+    const p = profile || {};
+    const arr = Array.isArray(p.neighbourhoods) ? p.neighbourhoods : [];
     if (arr.length === 0) return p.city || "";
-    var d = date || new Date();
-    var idx = (d.getDate() - 1) % arr.length;
+    const d = date || new Date();
+    const idx = (d.getDate() - 1) % arr.length;
     return arr[idx];
 }
 
 function safeJoinHashtags(arr, maxChars) {
     if (!Array.isArray(arr)) return "";
-    var out = "";
-    for (var i = 0; i < arr.length; i++) {
-        var h = String(arr[i] || "").trim();
+    let out = "";
+    for (let i = 0; i < arr.length; i++) {
+        let h = String(arr[i] || "").trim();
         if (h === "") continue;
         if (h[0] !== "#") h = "#" + h.replace(/^#+/, "");
-        var candidate = out === "" ? h : out + " " + h;
+        const candidate = out === "" ? h : out + " " + h;
         if (candidate.length > maxChars) break;
         out = candidate;
     }
@@ -66,15 +67,15 @@ function safeJoinHashtags(arr, maxChars) {
 }
 
 function parseJsonResponse(text) {
-    var s = String(text || "");
+    let s = String(text || "");
     if (s.indexOf("```") !== -1) {
-        var first = s.indexOf("{");
-        var last = s.lastIndexOf("}");
+        const first = s.indexOf("{");
+        const last = s.lastIndexOf("}");
         if (first !== -1 && last !== -1 && last > first)
             s = s.slice(first, last + 1);
     }
     try {
-        var obj = JSON.parse(s);
+        const obj = JSON.parse(s);
         if (obj && typeof obj === "object") return obj;
         return null;
     } catch (_) {
@@ -87,17 +88,16 @@ async function aiGenerateSummaryAndHashtags(
     neighbourhood,
     openaiClient
 ) {
-    var city = profile && profile.city ? profile.city : "";
-    var businessName =
+    const city = profile && profile.city ? profile.city : "";
+    const businessName =
         profile && profile.businessName ? profile.businessName : "";
-    var keywords = Array.isArray(profile && profile.keywords) ?
-        profile.keywords :
-        [];
-    var kwLine = keywords.join(", ");
-    var where =
+    const keywords = Array.isArray(profile && profile.keywords) ?
+        profile.keywords : [];
+    const kwLine = keywords.join(", ");
+    const where =
         neighbourhood && neighbourhood !== "" ? neighbourhood + ", " + city : city;
 
-    var prompt =
+    const prompt =
         "Return ONLY valid JSON with fields: summary (string), hashtags (array of 5-7 strings). " +
         "Do not include markdown fences. " +
         "Constraints: summary 80-120 words, friendly, benefit-focused, no phone numbers, no emojis in body, no hashtags in body. " +
@@ -113,13 +113,13 @@ async function aiGenerateSummaryAndHashtags(
         kwLine +
         "\n";
 
-    var completion = await openaiClient.chat.completions.create({
+    const completion = await openaiClient.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.7,
     });
 
-    var txt = "";
+    let txt = "";
     if (
         completion &&
         completion.choices &&
@@ -130,19 +130,19 @@ async function aiGenerateSummaryAndHashtags(
         txt = completion.choices[0].message.content;
     }
 
-    var obj = parseJsonResponse(txt);
+    const obj = parseJsonResponse(txt);
     if (!obj) return { summary: String(txt || "").trim(), hashtags: [] };
 
-    var summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
-    var hashtags = Array.isArray(obj.hashtags) ? obj.hashtags : [];
-    var cleaned = [];
-    for (var i = 0; i < hashtags.length; i++) {
-        var h = String(hashtags[i] || "").trim();
+    const summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
+    const hashtags = Array.isArray(obj.hashtags) ? obj.hashtags : [];
+    const cleaned = [];
+    for (let i = 0; i < hashtags.length; i++) {
+        let h = String(hashtags[i] || "").trim();
         if (h === "") continue;
         if (h[0] !== "#") h = "#" + h.replace(/^#+/, "");
         cleaned.push(h);
     }
-    return { summary: summary, hashtags: cleaned };
+    return { summary, hashtags: cleaned };
 }
 
 // ---- URL / media helpers ----
@@ -168,7 +168,7 @@ function tryPickPhotoFromProfile(profile) {
         Array.isArray(profile.photoPool) &&
         profile.photoPool.length > 0
     ) {
-        var p =
+        const p =
             profile.photoPool[Math.floor(Math.random() * profile.photoPool.length)];
         if (p && typeof p === "object") return p;
     }
@@ -176,19 +176,19 @@ function tryPickPhotoFromProfile(profile) {
 }
 
 function tryPickPhotoFromUploads() {
-    var uploadDir = path.join(__dirname, "data", "uploads");
+    const uploadDir = path.join(__dirname, "data", "uploads");
     if (!fs.existsSync(uploadDir)) return null;
-    var files = fs.readdirSync(uploadDir).filter(function(f) {
+    const files = fs.readdirSync(uploadDir).filter(function(f) {
         return !f.startsWith(".") && /\.(jpg|jpeg|png|webp)$/i.test(f);
     });
     if (files.length === 0) return null;
-    var randomFile = files[Math.floor(Math.random() * files.length)];
+    const randomFile = files[Math.floor(Math.random() * files.length)];
     return { url: "/uploads/" + randomFile, caption: "" };
 }
 
 function isHttpsImage(u) {
     try {
-        var x = new URL(u);
+        const x = new URL(u);
         return (
             x.protocol === "https:" && /\.(png|jpe?g|webp)$/i.test(x.pathname || "")
         );
@@ -203,7 +203,7 @@ function escapeRegExp(s) {
 
 function trimUrlForCompare(u) {
     try {
-        var x = new URL(u);
+        const x = new URL(u);
         return (x.origin + x.pathname).replace(/\/+$/, "");
     } catch (_) {
         return String(u || "").replace(/\/+$/, "");
@@ -212,9 +212,9 @@ function trimUrlForCompare(u) {
 
 function dedupeUrlInText(text, url) {
     if (!text || !url) return text || "";
-    var core = escapeRegExp(trimUrlForCompare(url));
-    var rx = new RegExp("(https?:\\/\\/[^\\s]*" + core + "\\/?)", "ig");
-    var seen = false;
+    const core = escapeRegExp(trimUrlForCompare(url));
+    const rx = new RegExp("(https?:\\/\\/[^\\s]*" + core + "\\/?)", "ig");
+    let seen = false;
     return String(text).replace(rx, function(m) {
         if (seen) return "";
         seen = true;
@@ -223,9 +223,8 @@ function dedupeUrlInText(text, url) {
 }
 
 // ==================== CTA MAP ====================
-var CTA_MAP = {
-    CALL: { actionType: "CALL", needsUrl: true, urlKind: "tel" },
-    CALL_NOW: { actionType: "CALL", needsUrl: true, urlKind: "tel" }, // legacy alias
+// Only web CTAs here. CALL/CALL_NOW are handled specially (fallback to LEARN_MORE or omitted).
+const CTA_MAP = {
     LEARN_MORE: { actionType: "LEARN_MORE", needsUrl: true, urlKind: "http" },
     BOOK: { actionType: "BOOK", needsUrl: true, urlKind: "http" },
     ORDER: { actionType: "ORDER", needsUrl: true, urlKind: "http" },
@@ -234,51 +233,56 @@ var CTA_MAP = {
 };
 
 // ==================== LIVE LOCATION BASICS ====================
-var LOCATION_CACHE = {}; // { locationId: { websiteUri, primaryPhone, ts } }
+const LOCATION_CACHE = {}; // { locationId: { websiteUri, primaryPhone, ts } }
 function getCacheKey(profile) {
     return profile && profile.locationId ? String(profile.locationId) : "";
 }
+
 async function fetchLocationBasics(profile) {
-    var out = { websiteUri: "", primaryPhone: "" };
+    let out = { websiteUri: "", primaryPhone: "" };
     if (!profile) return out;
 
-    var key = getCacheKey(profile);
+    const key = getCacheKey(profile);
     if (key && LOCATION_CACHE[key]) {
-        var ageMs = Date.now() - LOCATION_CACHE[key].ts;
+        const ageMs = Date.now() - LOCATION_CACHE[key].ts;
         if (ageMs < 5 * 60 * 1000) return LOCATION_CACHE[key]; // 5 min cache
     }
     try {
-        var accountId = String(profile.accountId || "");
-        var locationId = String(profile.locationId || "");
+        const accountId = String(profile.accountId || "");
+        const locationId = String(profile.locationId || "");
         if (!accountId || !locationId) return out;
 
-        var url =
+        const url =
             "https://mybusinessbusinessinformation.googleapis.com/v1/accounts/" +
             accountId +
             "/locations/" +
             locationId +
             "?readMask=websiteUri,phoneNumbers";
-        var resp = await callBusinessProfileAPI("GET", url);
-        var data = resp && resp.data ? resp.data : {};
+        const resp = await callBusinessProfileAPI("GET", url);
+        const data = resp && resp.data ? resp.data : {};
 
-        var websiteUri = data && data.websiteUri ? String(data.websiteUri) : "";
-        var primaryPhone = "";
+        const websiteUri = data && data.websiteUri ? String(data.websiteUri) : "";
+        let primaryPhone = "";
         if (data && data.phoneNumbers && data.phoneNumbers.primaryPhone) {
             primaryPhone = String(data.phoneNumbers.primaryPhone);
         }
-        out = { websiteUri, primaryPhone, ts: Date.now() };
+        out = {
+            websiteUri,
+            primaryPhone,
+            ts: Date.now(),
+        };
         if (key) LOCATION_CACHE[key] = out;
         return out;
     } catch (e) {
-        var fallbackPhone = profile && profile.phone ? String(profile.phone) : "";
-        var fallbackSite =
+        const fallbackPhone = profile && profile.phone ? String(profile.phone) : "";
+        const fallbackSite =
             profile && profile.landingUrl ? String(profile.landingUrl) : "";
         out = {
             websiteUri: fallbackSite,
             primaryPhone: fallbackPhone,
             ts: Date.now(),
         };
-        var k = getCacheKey(profile);
+        const k = getCacheKey(profile);
         if (k) LOCATION_CACHE[k] = out;
         return out;
     }
@@ -286,118 +290,107 @@ async function fetchLocationBasics(profile) {
 
 // Resolve CTA/link/media using body, profile defaults, and Google basics
 function resolveDefaults(profile, body, basics) {
-    var d = profile && profile.defaults ? profile.defaults : {};
-    var incomingCta =
+    const d = profile && profile.defaults ? profile.defaults : {};
+    const incomingCta =
         body && typeof body.cta === "string" && body.cta ? body.cta : "";
-    var incomingLink =
+    const incomingLink =
         body && typeof body.linkUrl === "string" ? body.linkUrl : null; // null = not provided
-    var incomingMedia =
+    const incomingMedia =
         body && typeof body.mediaUrl === "string" ? body.mediaUrl : null;
 
-    var cta = incomingCta ? incomingCta : d.cta ? d.cta : "CALL";
+    const cta = incomingCta ? incomingCta : d.cta ? d.cta : "LEARN_MORE"; // default to LEARN_MORE now
 
     // website candidate priority: defaults.linkUrl > profile.landingUrl > Google websiteUri
-    var siteFromDefaults = typeof d.linkUrl === "string" ? d.linkUrl : "";
-    var siteFromProfile =
+    const siteFromDefaults = typeof d.linkUrl === "string" ? d.linkUrl : "";
+    const siteFromProfile =
         profile && profile.landingUrl ? String(profile.landingUrl) : "";
-    var siteFromGoogle =
+    const siteFromGoogle =
         basics && basics.websiteUri ? String(basics.websiteUri) : "";
-    var siteCandidate = siteFromDefaults || siteFromProfile || siteFromGoogle;
+    const siteCandidate = siteFromDefaults || siteFromProfile || siteFromGoogle;
 
-    var linkUrl = incomingLink !== null ? incomingLink : siteCandidate;
+    const linkUrl = incomingLink !== null ? incomingLink : siteCandidate;
 
-    var defMedia = typeof d.mediaUrl === "string" ? d.mediaUrl : "";
-    var mediaUrl = incomingMedia !== null ? incomingMedia : defMedia;
+    const defMedia = typeof d.mediaUrl === "string" ? d.mediaUrl : "";
+    const mediaUrl = incomingMedia !== null ? incomingMedia : defMedia;
 
     return { cta, linkUrl, mediaUrl, siteCandidate };
 }
 
+/**
+ * Build a CTA for STANDARD posts with these rules:
+ * - If ctaCode is CALL/CALL_NOW -> use LEARN_MORE if we have a valid https site URL; else return null (no CTA).
+ * - For web CTAs (LEARN_MORE/BOOK/ORDER/SHOP/SIGN_UP) -> require valid https URL; else return null.
+ */
 function buildCallToAction(profile, ctaCode, linkUrl, basics) {
-    var spec = CTA_MAP[ctaCode] || CTA_MAP.CALL; // default to CALL
-    var finalUrl = "";
-
-    if (spec.needsUrl) {
-        if (spec.urlKind === "tel") {
-            var explicitTel =
-                typeof linkUrl === "string" && /^tel:/i.test(linkUrl) ? linkUrl : "";
-            var googlePhone =
-                basics && basics.primaryPhone ? String(basics.primaryPhone) : "";
-            var profPhone = profile && profile.phone ? String(profile.phone) : "";
-            var chosen = explicitTel ?
-                explicitTel :
-                googlePhone ?
-                "tel:" + googlePhone.replace(/[^+\d]/g, "") :
-                "";
-            if (!chosen && profPhone)
-                chosen = "tel:" + profPhone.replace(/[^+\d]/g, "");
-            finalUrl = chosen;
-        } else {
-            var candidate = typeof linkUrl === "string" && linkUrl ? linkUrl : "";
-            if (!candidate || !/^https?:\/\//i.test(candidate)) {
-                candidate =
-                    basics && basics.websiteUri ? String(basics.websiteUri) : "";
-            }
-            if (!candidate || !/^https?:\/\//i.test(candidate)) {
-                candidate =
-                    profile && profile.landingUrl ? String(profile.landingUrl) : "";
-            }
-            finalUrl = candidate;
+    // Normalize CALL* -> LEARN_MORE fallback attempt
+    if (ctaCode === "CALL" || ctaCode === "CALL_NOW") {
+        // try to find a https site
+        let candidate = typeof linkUrl === "string" && linkUrl ? linkUrl : "";
+        if (!/^https?:\/\//i.test(candidate || "")) {
+            candidate =
+                (basics && basics.websiteUri) || (profile && profile.landingUrl) || "";
         }
+        if (candidate && /^https?:\/\//i.test(candidate)) {
+            return { actionType: "LEARN_MORE", url: candidate };
+        }
+        return null; // no site -> no CTA
     }
-    var cta = { actionType: spec.actionType };
-    if (finalUrl) cta.url = finalUrl;
-    return cta;
+
+    const spec = CTA_MAP[ctaCode] || null;
+    if (!spec) return null;
+
+    // only http(s) CTAs here
+    let candidate = typeof linkUrl === "string" && linkUrl ? linkUrl : "";
+    if (!/^https?:\/\//i.test(candidate || "")) {
+        candidate =
+            (basics && basics.websiteUri) || (profile && profile.landingUrl) || "";
+    }
+    if (!candidate || !/^https?:\/\//i.test(candidate)) return null;
+
+    return { actionType: spec.actionType, url: candidate };
 }
 
 // ==================== GBP: ACCOUNTS & LOCATIONS ====================
 app.get("/accounts", async function(_req, res) {
     try {
-        var url =
+        const url =
             "https://mybusinessbusinessinformation.googleapis.com/v1/accounts";
-        var result = await callBusinessProfileAPI("GET", url);
+        const result = await callBusinessProfileAPI("GET", url);
         res.json(result.data);
     } catch (e) {
-        var errMsg =
-            e && e.response && e.response.data ?
-            e.response.data :
-            e && e.message ?
-            e.message :
-            String(e);
+        const errMsg =
+            (e && e.response && e.response.data) || (e && e.message) || String(e);
         res.status(500).json({ error: errMsg });
     }
 });
 
 app.get("/locations", async function(req, res) {
     try {
-        var accountId = req.query.accountId;
-        var readMask = req.query.readMask;
+        const accountId = req.query.accountId;
+        let readMask = req.query.readMask;
         if (!accountId) return res.status(400).json({ error: "Missing accountId" });
         if (!readMask || readMask.trim() === "") {
             readMask =
                 "name,title,storeCode,languageCode,websiteUri,phoneNumbers,metadata";
         }
-        var base =
+        const base =
             "https://mybusinessbusinessinformation.googleapis.com/v1/accounts/" +
             accountId +
             "/locations";
-        var url =
+        const url =
             base + "?readMask=" + encodeURIComponent(readMask) + "&pageSize=100";
-        var result = await callBusinessProfileAPI("GET", url);
+        const result = await callBusinessProfileAPI("GET", url);
         res.json(result.data);
     } catch (e) {
-        var errMsg =
-            e && e.response && e.response.data ?
-            e.response.data :
-            e && e.message ?
-            e.message :
-            String(e);
+        const errMsg =
+            (e && e.response && e.response.data) || (e && e.message) || String(e);
         res.status(500).json({ error: errMsg });
     }
 });
 
 // ==================== Load profiles once at startup ====================
-var PROFILES_PATH = path.join(__dirname, "data", "profiles.json");
-var PROFILES = [];
+const PROFILES_PATH = path.join(__dirname, "data", "profiles.json");
+let PROFILES = [];
 try {
     PROFILES = JSON.parse(fs.readFileSync(PROFILES_PATH, "utf8"));
     console.log("Loaded " + PROFILES.length + " profiles");
@@ -409,6 +402,7 @@ try {
 app.get("/health", function(_req, res) {
     res.json({ ok: true, status: "healthy" });
 });
+let serverPort = Number(process.env.PORT || 4000);
 app.get("/version", function(_req, res) {
     res.json({
         name: "gmb-automation-backend",
@@ -419,19 +413,18 @@ app.get("/version", function(_req, res) {
 });
 app.get("/profiles", function(_req, res) {
     try {
-        var listFromStore = [];
+        let listFromStore = [];
         try {
             listFromStore = profilesStore.readAll();
         } catch (_) {}
-        var out =
+        const out =
             Array.isArray(PROFILES) && PROFILES.length > 0 ?
             PROFILES :
             Array.isArray(listFromStore) ?
-            listFromStore :
-            [];
+            listFromStore : [];
         res.json({ profiles: out });
     } catch (e) {
-        var msg = e && e.message ? e.message : String(e);
+        const msg = (e && e.message) || String(e);
         res.status(500).json({ error: msg });
     }
 });
@@ -439,11 +432,9 @@ app.get("/profiles", function(_req, res) {
 // ==================== UPDATE PROFILE DEFAULTS ====================
 app.patch("/profiles/:id/defaults", async function(req, res) {
     try {
-        var id = req.params.id;
-        var body = req.body || {};
-        var p = PROFILES.find(function(x) {
-            return x && x.profileId === id;
-        });
+        const id = req.params.id;
+        const body = req.body || {};
+        const p = PROFILES.find((x) => x && x.profileId === id);
         if (!p) return res.status(404).json({ error: "Profile not found" });
         p.defaults = p.defaults || {};
         if (typeof body.cta === "string") p.defaults.cta = body.cta;
@@ -461,23 +452,19 @@ app.patch("/profiles/:id/defaults", async function(req, res) {
             phone: p.phone || "",
         });
     } catch (e) {
-        res
-            .status(500)
-            .json({ ok: false, error: e && e.message ? e.message : String(e) });
+        res.status(500).json({ ok: false, error: (e && e.message) || String(e) });
     }
 });
 
 // ==================== AI POST GENERATION (preview) ====================
 app.get("/generate-post-by-profile", async function(req, res) {
-    var profileId = req.query.profileId;
+    const profileId = req.query.profileId;
     if (!profileId) return res.status(400).json({ error: "Missing profileId" });
 
-    var profile = PROFILES.find(function(p) {
-        return p && p.profileId === profileId;
-    });
+    const profile = PROFILES.find((p) => p && p.profileId === profileId);
     if (!profile) return res.status(404).json({ error: "Profile not found" });
 
-    var neighbourhood = pickNeighbourhood(profile) || profile.city;
+    const neighbourhood = pickNeighbourhood(profile) || profile.city;
     try {
         console.log(
             "📝 Generating post for " +
@@ -486,39 +473,32 @@ app.get("/generate-post-by-profile", async function(req, res) {
             neighbourhood +
             "..."
         );
-        var resultAI = await aiGenerateSummaryAndHashtags(
+        const resultAI = await aiGenerateSummaryAndHashtags(
             profile,
             neighbourhood,
             openai
         );
-        var summaryAI = resultAI ? resultAI.summary : "";
-        var hashtagsAI =
+        const summaryAI = resultAI ? resultAI.summary : "";
+        const hashtagsAI =
             resultAI && Array.isArray(resultAI.hashtags) ? resultAI.hashtags : [];
         if (!summaryAI) throw new Error("No summary returned from AI");
 
-        var postText = summaryAI + "\n\n";
-        if (profile.reviewsUrl)
-            postText += "Reviews ➡️ " + profile.reviewsUrl + "\n";
-        if (profile.serviceAreaUrl)
-            postText += "Service Area ➡️ " + profile.serviceAreaUrl + "\n";
-
-        // Prefer one Google Maps link in preview too (mapsUri, then mapsUrl)
-        var mapsUrlOrUri = profile.mapsUri || profile.mapsUrl;
-        if (mapsUrlOrUri) postText += "Google Maps ➡️ " + mapsUrlOrUri + "\n";
-
-        if (hashtagsAI && hashtagsAI.length > 0)
-            postText += "\n" + hashtagsAI.join(" ");
+        // keep body separate from hashtags; no links here to avoid doubles
+        let postText = summaryAI;
+        if (hashtagsAI && hashtagsAI.length > 0) {
+            postText += "\n\n" + hashtagsAI.join(" ");
+        }
 
         console.log("✅ Post generated for " + profile.businessName);
         return res.json({
             profileId: profile.profileId,
             businessName: profile.businessName,
             city: profile.city,
-            neighbourhood: neighbourhood,
+            neighbourhood,
             post: postText,
         });
     } catch (err) {
-        var msg = err && err.message ? err.message : String(err);
+        const msg = (err && err.message) || String(err);
         console.error("❌ AI generation error:", msg);
         return res
             .status(500)
@@ -528,8 +508,8 @@ app.get("/generate-post-by-profile", async function(req, res) {
 
 // ==================== GOOGLE AUTH ====================
 app.get("/auth", function(_req, res) {
-    var scopes = ["https://www.googleapis.com/auth/business.manage"];
-    var url = oauth2Client.generateAuthUrl({
+    const scopes = ["https://www.googleapis.com/auth/business.manage"];
+    const url = oauth2Client.generateAuthUrl({
         access_type: "offline",
         scope: scopes,
         prompt: "consent",
@@ -538,18 +518,18 @@ app.get("/auth", function(_req, res) {
 });
 
 app.get("/oauth2callback", async function(req, res) {
-    var code = req.query.code;
+    const code = req.query.code;
     if (!code) return res.status(400).send("Missing code");
     try {
-        var tokenResp = await oauth2Client.getToken(code);
-        var tokens = tokenResp && tokenResp.tokens ? tokenResp.tokens : null;
+        const tokenResp = await oauth2Client.getToken(code);
+        const tokens = tokenResp && tokenResp.tokens ? tokenResp.tokens : null;
         if (tokens) oauth2Client.setCredentials(tokens);
-        var TOKENS_PATH = path.join(__dirname, "data", "tokens.json");
+        const TOKENS_PATH = path.join(__dirname, "data", "tokens.json");
         fs.mkdirSync(path.join(__dirname, "data"), { recursive: true });
         fs.writeFileSync(TOKENS_PATH, JSON.stringify(tokens, null, 2));
         res.send("✅ Tokens saved successfully! You can now use the API.");
     } catch (err) {
-        var msg = err && err.message ? err.message : String(err);
+        const msg = (err && err.message) || String(err);
         console.error("Error retrieving access token", msg);
         res.status(500).send("Auth failed");
     }
@@ -558,30 +538,29 @@ app.get("/oauth2callback", async function(req, res) {
 // ==================== CORE POST LOGIC ====================
 async function postToGmb(body) {
     // Inputs / profile
-    var profileId = body && body.profileId ? String(body.profileId) : "";
-    var postText = body && typeof body.postText === "string" ? body.postText : "";
+    const profileId = body && body.profileId ? String(body.profileId) : "";
+    let postText = body && typeof body.postText === "string" ? body.postText : "";
+    const isBulk = !!body.bulk; // bulk flag: skip store writes to avoid nodemon restarts
     if (!profileId) throw new Error("Missing profileId");
 
-    var profile = PROFILES.find(function(p) {
-        return p && p.profileId === profileId;
-    });
+    const profile = PROFILES.find((p) => p && p.profileId === profileId);
     if (!profile) throw new Error("Profile not found");
 
     // Fresh basics (phone / website)
-    var basics = await fetchLocationBasics(profile);
+    const basics = await fetchLocationBasics(profile);
 
     // Resolve defaults and site candidate
-    var rd = resolveDefaults(
+    const rd = resolveDefaults(
         profile, { cta: body.cta, linkUrl: body.linkUrl, mediaUrl: body.mediaUrl },
         basics
     );
-    var ctaCode = rd.cta;
-    var providedLinkUrl = rd.linkUrl || "";
-    var mediaUrl = rd.mediaUrl || "";
-    var siteCandidate = rd.siteCandidate || "";
+    const ctaCode = rd.cta;
+    const providedLinkUrl = rd.linkUrl || "";
+    const mediaUrl = rd.mediaUrl || "";
+    const siteCandidate = rd.siteCandidate || "";
 
     // Pick photo
-    var chosenPhoto = null;
+    let chosenPhoto = null;
     if (
         isHttpsImage(mediaUrl) &&
         isPublicHttps(mediaUrl) &&
@@ -589,7 +568,7 @@ async function postToGmb(body) {
     ) {
         chosenPhoto = { url: mediaUrl, caption: "" };
     } else {
-        var candidate =
+        const candidate =
             tryPickPhotoFromProfile(profile) || tryPickPhotoFromUploads();
         if (
             candidate &&
@@ -602,82 +581,60 @@ async function postToGmb(body) {
     }
 
     // Generate text if needed
-    var generatedHashtags = [];
+    let generatedHashtags = [];
     if (!postText) {
-        var nbh = pickNeighbourhood(profile, new Date());
-        var gen = await aiGenerateSummaryAndHashtags(profile, nbh, openai);
+        const nbh = pickNeighbourhood(profile, new Date());
+        const gen = await aiGenerateSummaryAndHashtags(profile, nbh, openai);
         postText = gen && gen.summary ? gen.summary : "";
         generatedHashtags = gen && Array.isArray(gen.hashtags) ? gen.hashtags : [];
     }
 
-    // Links section (deduped)
-    var summary = String(postText || "").trim();
-    var links = [];
-    var seen = {};
+    // Build body, then links (deduped)
+    let summary = String(postText || "").trim();
+
+    // Optional links section (deduped). Keep Google Maps once; prefer mapsUri over mapsUrl.
+    const links = [];
+    const seen = {};
 
     function maybePush(label, url) {
         if (!url) return;
-        var key = trimUrlForCompare(url);
+        const key = trimUrlForCompare(url);
         if (seen[key]) return;
         seen[key] = true;
         links.push(label + " ➡️ " + url);
     }
-    // Prefer a single Google Maps link (avoid pushing both)
-    var maps = profile.mapsUri || profile.mapsUrl;
+    const maps = profile.mapsUri || profile.mapsUrl;
     maybePush("Reviews", profile.reviewsUrl);
     maybePush("Service Area", profile.serviceAreaUrl);
     maybePush("Google Maps", maps);
     if (links.length) summary += "\n\n" + links.join("\n");
 
     if (generatedHashtags.length > 0) {
-        var spaceLeft = 1450 - summary.length;
+        const spaceLeft = 1450 - summary.length;
         if (spaceLeft > 20) {
-            var tagLine = safeJoinHashtags(generatedHashtags, spaceLeft);
+            const tagLine = safeJoinHashtags(generatedHashtags, spaceLeft);
             if (tagLine && summary.length + 2 + tagLine.length <= 1450)
                 summary += "\n\n" + tagLine;
         }
     }
 
-    // Build CTA with fallback rules
-    var ctaObj = buildCallToAction(profile, ctaCode, providedLinkUrl, basics);
-    var finalCta = null;
-    if (ctaObj && ctaObj.actionType) {
-        if (ctaObj.actionType === "CALL") {
-            if (ctaObj.url) {
-                finalCta = ctaObj; // valid CALL with tel:
-            } else {
-                // No phone available: fallback to LEARN_MORE using best site candidate
-                var site = siteCandidate;
-                if (!/^https?:\/\//i.test(site || "")) {
-                    site = basics.websiteUri || profile.landingUrl || "";
-                }
-                if (site) {
-                    finalCta = { actionType: "LEARN_MORE", url: site };
-                }
-            }
-        } else {
-            if (ctaObj.url) {
-                finalCta = ctaObj;
-            }
-        }
-    }
-
-    if (finalCta && finalCta.url) {
-        summary = dedupeUrlInText(summary, finalCta.url);
+    // CTA rules (CALL/CALL_NOW => LEARN_MORE with site, else no CTA)
+    const ctaObj = buildCallToAction(profile, ctaCode, providedLinkUrl, basics);
+    if (ctaObj && ctaObj.url) {
+        summary = dedupeUrlInText(summary, ctaObj.url);
     }
     if (summary.length > 1500) summary = summary.slice(0, 1500);
 
     // GBP payload
-    var parent =
+    const parent =
         "accounts/" + profile.accountId + "/locations/" + profile.locationId;
-    var url = "https://mybusiness.googleapis.com/v4/" + parent + "/localPosts";
+    const url = "https://mybusiness.googleapis.com/v4/" + parent + "/localPosts";
 
-    var payload = { languageCode: "en", topicType: "STANDARD", summary: summary };
-    if (finalCta && finalCta.actionType && finalCta.url) {
-        payload.callToAction = finalCta; // valid v4 CTA only
+    const payload = { languageCode: "en", topicType: "STANDARD", summary };
+    if (ctaObj && ctaObj.actionType && ctaObj.url) {
+        payload.callToAction = ctaObj; // web CTAs only
     }
 
-    // Media
     if (
         chosenPhoto &&
         chosenPhoto.url &&
@@ -688,104 +645,98 @@ async function postToGmb(body) {
         payload.media = [{ mediaFormat: "PHOTO", sourceUrl: chosenPhoto.url }];
     }
 
-    // Helper: dump payload for debugging
-    function logPayload(tag, pl) {
-        try {
-            console.error(
-                `[${tag}] Posting payload:\n` + JSON.stringify(pl, null, 2)
-            );
-        } catch (_) {}
-    }
-
-    // Call Google with 1-pass retry without CTA on INVALID_ARGUMENT
+    // Call Google (with one automatic retry stripping CTA if Google rejects it)
     try {
-        logPayload("TRY", payload);
-        var result = await callBusinessProfileAPI("POST", url, payload);
-
+        console.log("[TRY] Posting payload:");
         try {
-            postsStore.append({
-                profileId: profileId,
-                accountId: profile.accountId,
-                locationId: profile.locationId,
-                summary: summary,
-                usedImage: payload.media ?
-                    chosenPhoto ?
-                    chosenPhoto.url :
-                    null :
-                    null,
-                gmbPostId: result && result.data && result.data.name ? result.data.name : null,
-                status: "POSTED",
-                createdAt: new Date().toISOString(),
-            });
+            console.log(JSON.stringify(payload, null, 2));
         } catch (_) {}
+        const result = await callBusinessProfileAPI("POST", url, payload);
+
+        // persist a history record (skip during bulk to avoid nodemon restarts)
+        if (!isBulk) {
+            try {
+                postsStore.append({
+                    profileId,
+                    accountId: profile.accountId,
+                    locationId: profile.locationId,
+                    summary,
+                    usedImage: payload.media ?
+                        chosenPhoto ?
+                        chosenPhoto.url :
+                        null : null,
+                    gmbPostId: result && result.data && result.data.name ? result.data.name : null,
+                    status: "POSTED",
+                    createdAt: new Date().toISOString(),
+                });
+            } catch (_) {}
+        }
 
         return {
             data: result.data,
             usedImage: payload.media ? (chosenPhoto ? chosenPhoto.url : null) : null,
             ctaUsed: payload.callToAction || null,
             ctaStripped: false,
+            firstError: null,
         };
     } catch (err) {
         const detail =
             (err && err.response && err.response.data) ||
             (err && err.message) ||
             String(err);
-        console.error("❌ Google Post Error (first attempt):", detail);
 
-        // If we used a CTA, try once more without CTA (some accounts/locations reject CALL)
-        if (payload.callToAction) {
-            const retryPayload = {...payload };
-            delete retryPayload.callToAction;
+        // If Google rejects the CTA, strip it and retry once (to prevent a hard fail)
+        let shouldRetryWithoutCTA = false;
+        try {
+            const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
+            if (/INVALID_ARGUMENT/i.test(msg)) shouldRetryWithoutCTA = true;
+        } catch (_) {}
+
+        if (shouldRetryWithoutCTA && payload.callToAction) {
+            console.error("❌ Google Post Error (first attempt):", detail);
+            const firstError = detail;
+            delete payload.callToAction;
+            console.log("[RETRY_NO_CTA] Posting payload:");
             try {
-                logPayload("RETRY_NO_CTA", retryPayload);
-                var result2 = await callBusinessProfileAPI("POST", url, retryPayload);
+                console.log(JSON.stringify(payload, null, 2));
+            } catch (_) {}
+            const result2 = await callBusinessProfileAPI("POST", url, payload);
 
+            if (!isBulk) {
                 try {
                     postsStore.append({
-                        profileId: profileId,
+                        profileId,
                         accountId: profile.accountId,
                         locationId: profile.locationId,
-                        summary: summary,
-                        usedImage: retryPayload.media ?
+                        summary,
+                        usedImage: payload.media ?
                             chosenPhoto ?
                             chosenPhoto.url :
-                            null :
-                            null,
+                            null : null,
                         gmbPostId: result2 && result2.data && result2.data.name ?
-                            result2.data.name :
-                            null,
+                            result2.data.name : null,
                         status: "POSTED",
                         createdAt: new Date().toISOString(),
                     });
                 } catch (_) {}
-
-                console.warn(
-                    "⚠️ CTA was stripped due to INVALID_ARGUMENT; post created without CTA."
-                );
-                return {
-                    data: result2.data,
-                    usedImage: retryPayload.media ?
-                        chosenPhoto ?
-                        chosenPhoto.url :
-                        null :
-                        null,
-                    ctaUsed: null,
-                    ctaStripped: true,
-                    firstError: detail,
-                };
-            } catch (err2) {
-                const detail2 =
-                    (err2 && err2.response && err2.response.data) ||
-                    (err2 && err2.message) ||
-                    String(err2);
-                console.error("❌ Google Post Error (retry w/o CTA):", detail2);
-                throw new Error(
-                    typeof detail2 === "string" ? detail2 : JSON.stringify(detail2)
-                );
             }
+
+            console.warn(
+                "⚠️ CTA was stripped due to INVALID_ARGUMENT; post created without CTA."
+            );
+            return {
+                data: result2.data,
+                usedImage: payload.media ?
+                    chosenPhoto ?
+                    chosenPhoto.url :
+                    null : null,
+                ctaUsed: null,
+                ctaStripped: true,
+                firstError,
+            };
         }
 
-        // No CTA to strip; propagate original error
+        console.error("❌ Google Post Error:", detail);
         throw new Error(
             typeof detail === "string" ? detail : JSON.stringify(detail)
         );
@@ -793,17 +744,19 @@ async function postToGmb(body) {
 }
 
 // ==================== POST ROUTES (used by frontend) ====================
+
 app.post("/post-to-gmb", async function(req, res) {
     try {
-        var body = req.body || {};
+        const body = req.body || {};
         if (!body.profileId)
             return res.status(400).json({ error: "Missing profileId" });
-        var r = await postToGmb({
+        const r = await postToGmb({
             profileId: body.profileId,
             postText: body.postText ? body.postText : "",
             cta: body.cta ? body.cta : "",
             linkUrl: body.linkUrl ? body.linkUrl : "",
             mediaUrl: body.mediaUrl ? body.mediaUrl : "",
+            bulk: !!body.bulk, // passthrough
         });
         res.json({
             success: true,
@@ -816,11 +769,9 @@ app.post("/post-to-gmb", async function(req, res) {
             firstError: r.firstError || null,
         });
     } catch (err) {
-        var errorMsg =
-            err && err.response && err.response.data ?
-            err.response.data :
-            err && err.message ?
-            err.message :
+        const errorMsg =
+            (err && err.response && err.response.data) ||
+            (err && err.message) ||
             String(err);
         console.error("❌ Failed to post to Google:", errorMsg);
         res
@@ -831,15 +782,16 @@ app.post("/post-to-gmb", async function(req, res) {
 
 app.post("/post-now", async function(req, res) {
     try {
-        var body = req.body || {};
+        const body = req.body || {};
         if (!body.profileId)
             return res.status(400).json({ error: "Missing profileId" });
-        var r = await postToGmb({
+        const r = await postToGmb({
             profileId: body.profileId,
             postText: body.postText ? body.postText : "",
             cta: body.cta ? body.cta : "",
             linkUrl: body.linkUrl ? body.linkUrl : "",
             mediaUrl: body.mediaUrl ? body.mediaUrl : "",
+            bulk: false,
         });
         LAST_RUN_MAP[body.profileId] = new Date().toISOString();
         res.json({
@@ -850,20 +802,25 @@ app.post("/post-now", async function(req, res) {
             firstError: r.firstError || null,
         });
     } catch (err) {
-        var msg = err && err.message ? err.message : String(err);
+        const msg = (err && err.message) || String(err);
         res.status(500).json({ error: msg });
     }
 });
 
 app.post("/post-now-all", async function(_req, res) {
     try {
-        var results = [];
-        var count = 0;
-        for (var i = 0; i < PROFILES.length; i++) {
-            var p = PROFILES[i];
+        const results = [];
+        let count = 0;
+        // IMPORTANT: pass bulk:true to avoid per-post file writes (nodemon restarts)
+        for (let i = 0; i < PROFILES.length; i++) {
+            const p = PROFILES[i];
             if (!p || !p.profileId) continue;
             try {
-                var r = await postToGmb({ profileId: p.profileId, postText: "" });
+                const r = await postToGmb({
+                    profileId: p.profileId,
+                    postText: "",
+                    bulk: true,
+                });
                 LAST_RUN_MAP[p.profileId] = new Date().toISOString();
                 results.push({
                     profileId: p.profileId,
@@ -878,26 +835,26 @@ app.post("/post-now-all", async function(_req, res) {
                 results.push({
                     profileId: p.profileId,
                     ok: false,
-                    error: e && e.message ? e.message : String(e),
+                    error: (e && e.message) || String(e),
                 });
             }
         }
-        res.json({ ok: true, count: count, results: results });
+        res.json({ ok: true, count, results });
     } catch (err) {
-        var msg = err && err.message ? err.message : String(err);
+        const msg = (err && err.message) || String(err);
         res.status(500).json({ error: msg });
     }
 });
 
 // ==================== SCHEDULER API (simple in-memory state) ====================
-var DEFAULT_SCHED = {
+const DEFAULT_SCHED = {
     enabled: false,
     defaultTime: "10:00",
     tickSeconds: 30,
     perProfileTimes: {},
 };
-var SCHED_CFG = Object.assign({}, DEFAULT_SCHED);
-var LAST_RUN_MAP = {}; // { profileId: ISOString }
+const SCHED_CFG = Object.assign({}, DEFAULT_SCHED);
+const LAST_RUN_MAP = {}; // { profileId: ISOString }
 
 app.get("/scheduler/config", function(_req, res) {
     res.json(SCHED_CFG);
@@ -905,7 +862,7 @@ app.get("/scheduler/config", function(_req, res) {
 
 app.put("/scheduler/config", function(req, res) {
     try {
-        var body = req.body || {};
+        const body = req.body || {};
         SCHED_CFG.enabled = !!body.enabled;
         if (
             typeof body.defaultTime === "string" &&
@@ -914,31 +871,31 @@ app.put("/scheduler/config", function(req, res) {
             SCHED_CFG.defaultTime = body.defaultTime;
         if (typeof body.tickSeconds === "number" && body.tickSeconds > 0)
             SCHED_CFG.tickSeconds = body.tickSeconds;
-        var ppt = body.perProfileTimes || {};
+        const ppt = body.perProfileTimes || {};
         if (ppt && typeof ppt === "object") {
-            var cleaned = {};
-            var keys = Object.keys(ppt);
-            for (var i = 0; i < keys.length; i++) {
-                var k = keys[i];
-                var v = String(ppt[k] || "");
+            const cleaned = {};
+            const keys = Object.keys(ppt);
+            for (let i = 0; i < keys.length; i++) {
+                const k = keys[i];
+                const v = String(ppt[k] || "");
                 if (/^\d{2}:\d{2}$/.test(v)) cleaned[k] = v;
             }
             SCHED_CFG.perProfileTimes = cleaned;
         }
         res.json({ ok: true, config: SCHED_CFG });
     } catch (e) {
-        res.status(400).json({ error: e && e.message ? e.message : String(e) });
+        res.status(400).json({ error: (e && e.message) || String(e) });
     }
 });
 
 app.get("/scheduler/status", function(_req, res) {
-    var todayISO = new Date().toISOString().slice(0, 10);
-    var profiles = (Array.isArray(PROFILES) ? PROFILES : []).map(function(p) {
-        var hhmm =
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const profiles = (Array.isArray(PROFILES) ? PROFILES : []).map(function(p) {
+        const hhmm =
             (SCHED_CFG.perProfileTimes && SCHED_CFG.perProfileTimes[p.profileId]) ||
             SCHED_CFG.defaultTime;
-        var lastRunISODate = LAST_RUN_MAP[p.profileId] || null;
-        var willRunToday = !!SCHED_CFG.enabled;
+        const lastRunISODate = LAST_RUN_MAP[p.profileId] || null;
+        const willRunToday = !!SCHED_CFG.enabled;
         return {
             profileId: p.profileId,
             businessName: p.businessName || "",
@@ -958,71 +915,56 @@ app.get("/scheduler/status", function(_req, res) {
 
 app.post("/scheduler/run-once", async function(_req, res) {
     try {
-        var results = [];
-        for (var i = 0; i < PROFILES.length; i++) {
-            var p = PROFILES[i];
+        const results = [];
+        for (let i = 0; i < PROFILES.length; i++) {
+            const p = PROFILES[i];
             if (!p || !p.profileId) continue;
             try {
-                var r = await postToGmb({ profileId: p.profileId, postText: "" });
-                LAST_RUN_MAP[p.profileId] = new Date().toISOString();
-                results.push({
+                const r = await postToGmb({
                     profileId: p.profileId,
-                    ok: true,
-                    data: r.data,
-                    ctaUsed: r.ctaUsed || null,
-                    ctaStripped: !!r.ctaStripped,
-                    firstError: r.firstError || null,
+                    postText: "",
+                    bulk: true,
                 });
+                LAST_RUN_MAP[p.profileId] = new Date().toISOString();
+                results.push({ profileId: p.profileId, ok: true, data: r.data });
             } catch (e) {
                 results.push({
                     profileId: p.profileId,
                     ok: false,
-                    error: e && e.message ? e.message : String(e),
+                    error: (e && e.message) || String(e),
                 });
             }
         }
-        res.json({ ok: true, results: results });
+        res.json({ ok: true, results });
     } catch (err) {
-        res
-            .status(500)
-            .json({ error: err && err.message ? err.message : String(err) });
+        res.status(500).json({ error: (err && err.message) || String(err) });
     }
 });
 
 app.post("/scheduler/run-now/:profileId", async function(req, res) {
     try {
-        var id = req.params.profileId;
+        const id = req.params.profileId;
         if (!id) return res.status(400).json({ error: "Missing profileId" });
-        var r = await postToGmb({ profileId: id, postText: "" });
+        const r = await postToGmb({ profileId: id, postText: "", bulk: false });
         LAST_RUN_MAP[id] = new Date().toISOString();
-        res.json({
-            ok: true,
-            data: r.data,
-            ctaUsed: r.ctaUsed || null,
-            ctaStripped: !!r.ctaStripped,
-            firstError: r.firstError || null,
-        });
+        res.json({ ok: true, data: r.data });
     } catch (err) {
-        res
-            .status(500)
-            .json({ error: err && err.message ? err.message : String(err) });
+        res.status(500).json({ error: (err && err.message) || String(err) });
     }
 });
 
 // ==================== POSTS HISTORY ====================
 app.get("/posts/history", function(req, res) {
-    var qProfileId = req.query.profileId || "";
-    var qLimit = parseInt(req.query.limit || "50", 10);
+    const qProfileId = req.query.profileId || "";
+    const qLimit = parseInt(req.query.limit || "50", 10);
     try {
-        var items = [];
+        let items = [];
         if (postsStore && typeof postsStore.readLatest === "function") {
             items = postsStore.readLatest(qProfileId || null, qLimit);
         } else if (postsStore && typeof postsStore.readAll === "function") {
             items = postsStore.readAll();
             if (qProfileId)
-                items = items.filter(function(x) {
-                    return x && x.profileId === qProfileId;
-                });
+                items = items.filter((x) => x && x.profileId === qProfileId);
             items = items.slice(-qLimit);
         }
         res.json({ items: Array.isArray(items) ? items : [] });
@@ -1039,15 +981,14 @@ app.get("/", function(_req, res) {
 });
 
 // ==================== SERVER LIFECYCLE ====================
-var server = null;
-var serverPort = Number(process.env.PORT || 4000);
+let server = null;
 
 function tryListen(startPort, maxAttempts, cb) {
-    var attempt = 0;
+    let attempt = 0;
 
     function start() {
-        var p = startPort + attempt;
-        var s = app.listen(p, function() {
+        const p = startPort + attempt;
+        const s = app.listen(p, function() {
             server = s;
             serverPort = p;
             console.log(
@@ -1074,12 +1015,9 @@ function tryListen(startPort, maxAttempts, cb) {
     start();
 }
 
-tryListen(serverPort, 10, function(err) {
+tryListen(Number(process.env.PORT || 4000), 10, function(err) {
     if (err) {
-        console.error(
-            "💥 HTTP server error:",
-            err && err.message ? err.message : String(err)
-        );
+        console.error("💥 HTTP server error:", (err && err.message) || String(err));
         process.exit(1);
     }
 });
@@ -1094,10 +1032,7 @@ process.on("SIGTERM", function() {
     console.log("🛑 SIGTERM received");
 });
 process.on("uncaughtException", function(err) {
-    console.error(
-        "⚠️ Uncaught Exception:",
-        err && err.stack ? err.stack : String(err)
-    );
+    console.error("⚠️ Uncaught Exception:", (err && err.stack) || String(err));
 });
 process.on("unhandledRejection", function(reason) {
     console.error("⚠️ Unhandled Rejection:", String(reason));

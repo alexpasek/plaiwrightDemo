@@ -1,0 +1,12 @@
+{
+    "watch": ["index.cjs", "server", "google-client.cjs"],
+    "ignore": [
+        "data/*.json",
+        "data/uploads/*",
+        "data/**/*.json",
+        ".env",
+        "node_modules"
+    ],
+    "ext": "js,cjs,json",
+    "exec": "node --inspect ./index.cjs"
+}

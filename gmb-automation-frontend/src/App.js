@@ -22,7 +22,7 @@ export default function App() {
   const [preview, setPreview] = useState("");
   const [postText, setPostText] = useState("");
 
-  // new CTA+Link+Media controls
+  // CTA+Link+Media controls
   const [cta, setCta] = useState("CALL_NOW");
   const [linkUrl, setLinkUrl] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
@@ -41,6 +41,7 @@ export default function App() {
   function notify(msg) {
     setToast(msg);
     setTimeout(() => setToast(""), 2500);
+    console.log(msg);
   }
 
   async function bootstrap() {
@@ -56,7 +57,6 @@ export default function App() {
       setVersion(v);
       const list = Array.isArray(pr?.profiles) ? pr.profiles : [];
       setProfiles(list);
-      // pick first profile
       if (list[0]?.profileId) setSelectedId(list[0].profileId);
       setSchedConfig(sc);
       setSchedStatus(ss);
@@ -83,7 +83,7 @@ export default function App() {
   async function doPreview() {
     if (!selectedId) return notify("Select a profile first");
     setPreview("");
-    setPostText("");
+    // keep any manual text until preview returns
     try {
       const r = await api.generatePost(selectedId);
       if (r && r.post) {
@@ -91,7 +91,6 @@ export default function App() {
         setPostText(r.post);
       } else {
         setPreview(JSON.stringify(r, null, 2));
-        setPostText("");
       }
     } catch (e) {
       notify(e.message || "Preview failed");
@@ -127,19 +126,14 @@ export default function App() {
     if (!validateBeforePost()) return;
     setBusy(true);
     try {
-      // Call backend directly with extended payload (keeps your existing api.js intact)
-      const r = await fetch("http://localhost:4000/post-now", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          profileId: selectedId,
-          postText,
-          cta,
-          linkUrl,
-          mediaUrl,
-        }),
+      // Use API helper (discovers 4000/4001 etc. and uses long timeout)
+      await api.postNow({
+        profileId: selectedId,
+        postText,
+        cta,
+        linkUrl,
+        mediaUrl,
       });
-      if (!r.ok) throw new Error(await r.text());
       notify("Posted!");
       await refreshHistory();
     } catch (e) {
@@ -244,23 +238,16 @@ export default function App() {
     }
   }
 
-  // Update profile defaults inline (PATCH /profiles/:id/defaults)
+  // Update profile defaults inline via API helper (no hard-coded port)
   async function saveProfileDefaults() {
     if (!selectedProfile) return;
     try {
-      const r = await fetch(
-        `http://localhost:4000/profiles/${encodeURIComponent(
-          selectedProfile.profileId
-        )}/defaults`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cta, linkUrl, mediaUrl }),
-        }
-      );
-      if (!r.ok) throw new Error(await r.text());
+      await api.updateProfileDefaults(selectedProfile.profileId, {
+        cta,
+        linkUrl,
+        mediaUrl,
+      });
       notify("Defaults saved");
-      // Refresh profiles to reflect new defaults
       const pr = await api.getProfiles();
       const list = Array.isArray(pr?.profiles) ? pr.profiles : [];
       setProfiles(list);

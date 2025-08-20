@@ -1,7 +1,7 @@
 // src/lib/api.js
 
-// --- tiny fetch with timeout ---
-async function xfetch(url, opts = {}, ms = 6000) {
+// --- tiny fetch with timeout (default 45s, was 6s) ---
+async function xfetch(url, opts = {}, ms = 45000) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ms);
     try {
@@ -18,16 +18,18 @@ let BASE = null;
 async function discoverBaseUrl() {
     const proto = window.location.protocol || "http:";
     const host = window.location.hostname || "localhost";
-    const candidates = [
-        `${proto}//${host}:4000`,
-        `http://localhost:4000`,
-        `http://127.0.0.1:4000`,
-    ];
+
+    // Try localhost:4000..4010, plus 127.0.0.1
+    const candidates = [];
+    for (let port = 4000; port <= 4010; port++) {
+        candidates.push(`${proto}//${host}:${port}`);
+        candidates.push(`http://127.0.0.1:${port}`);
+    }
 
     for (let i = 0; i < candidates.length; i++) {
         const b = candidates[i];
         try {
-            const r = await xfetch(b + "/health", { method: "GET" }, 2500);
+            const r = await xfetch(b + "/health", { method: "GET" }, 3000);
             if (r.ok) {
                 const j = await r.json().catch(() => null);
                 if (j && j.ok) return b;
@@ -36,6 +38,7 @@ async function discoverBaseUrl() {
             // keep trying other candidates
         }
     }
+    // Fallback (most common)
     return `http://localhost:4000`;
 }
 
@@ -45,26 +48,29 @@ async function base() {
     return BASE;
 }
 
-// Expose for BackendBadge.jsx
+// Expose for BackendBadge.jsx or other callers
 export async function getApiBase() {
     return base();
 }
 
 // --- helpers ---
-async function getJson(path) {
+async function getJson(path, timeoutMs = 45000) {
     const b = await base();
-    const r = await xfetch(b + path, { method: "GET" });
+    const r = await xfetch(b + path, { method: "GET" }, timeoutMs);
     if (!r.ok) throw new Error(`GET ${path} ${r.status}`);
     return r.json();
 }
 
-async function postJson(path, body) {
+async function postJson(path, body, timeoutMs = 45000) {
     const b = await base();
-    const r = await xfetch(b + path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body || {}),
-    });
+    const r = await xfetch(
+        b + path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body || {}),
+        },
+        timeoutMs
+    );
     if (!r.ok) {
         const t = await r.text().catch(() => "");
         throw new Error(`POST ${path} ${r.status} ${t}`);
@@ -72,13 +78,16 @@ async function postJson(path, body) {
     return r.json();
 }
 
-async function putJson(path, body) {
+async function putJson(path, body, timeoutMs = 45000) {
     const b = await base();
-    const r = await xfetch(b + path, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body || {}),
-    });
+    const r = await xfetch(
+        b + path, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body || {}),
+        },
+        timeoutMs
+    );
     if (!r.ok) {
         const t = await r.text().catch(() => "");
         throw new Error(`PUT ${path} ${r.status} ${t}`);
@@ -86,13 +95,16 @@ async function putJson(path, body) {
     return r.json();
 }
 
-async function patchJson(path, body) {
+async function patchJson(path, body, timeoutMs = 45000) {
     const b = await base();
-    const r = await xfetch(b + path, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body || {}),
-    });
+    const r = await xfetch(
+        b + path, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body || {}),
+        },
+        timeoutMs
+    );
     if (!r.ok) {
         const t = await r.text().catch(() => "");
         throw new Error(`PATCH ${path} ${r.status} ${t}`);
@@ -103,17 +115,19 @@ async function patchJson(path, body) {
 // --- API surface used by your App.jsx ---
 
 export async function getHealth() {
-    return getJson("/health");
+    return getJson("/health", 5000);
 }
 export async function getVersion() {
-    return getJson("/version");
+    return getJson("/version", 5000);
 }
 export async function getProfiles() {
-    return getJson("/profiles");
+    return getJson("/profiles", 10000);
 }
 export async function generatePost(profileId) {
+    // Allow more time for OpenAI generation
     return getJson(
-        `/generate-post-by-profile?profileId=${encodeURIComponent(profileId)}`
+        `/generate-post-by-profile?profileId=${encodeURIComponent(profileId)}`,
+        45000
     );
 }
 
@@ -137,27 +151,30 @@ export async function postNow(
             mediaUrl: mediaUrl || "",
         };
     }
-    return postJson("/post-now", body);
+    return postJson("/post-now", body, 45000);
 }
 
 export async function postNowAll() {
-    return postJson("/post-now-all", {});
+    return postJson("/post-now-all", {}, 180000);
 }
 
 export async function getSchedulerConfig() {
-    return getJson("/scheduler/config");
+    return getJson("/scheduler/config", 8000);
 }
 export async function setSchedulerConfig(cfg) {
-    return putJson("/scheduler/config", cfg);
+    return putJson("/scheduler/config", cfg, 8000);
 }
 export async function getSchedulerStatus() {
-    return getJson("/scheduler/status");
+    return getJson("/scheduler/status", 8000);
 }
 export async function runSchedulerOnce() {
-    return postJson("/scheduler/run-once", {});
+    return postJson("/scheduler/run-once", {}, 45000);
 }
 export async function runSchedulerNow(profileId) {
-    return postJson(`/scheduler/run-now/${encodeURIComponent(profileId)}`, {});
+    return postJson(
+        `/scheduler/run-now/${encodeURIComponent(profileId)}`, {},
+        45000
+    );
 }
 
 export async function getPostHistory(profileId, limit = 50) {
@@ -165,21 +182,22 @@ export async function getPostHistory(profileId, limit = 50) {
     if (profileId) q.push(`profileId=${encodeURIComponent(profileId)}`);
     if (limit) q.push(`limit=${encodeURIComponent(String(limit))}`);
     const qs = q.length ? `?${q.join("&")}` : "";
-    return getJson(`/posts/history${qs}`);
+    return getJson(`/posts/history${qs}`, 10000);
 }
 
 export async function postToGmb(body) {
-    return postJson("/post-to-gmb", body);
+    return postJson("/post-to-gmb", body, 45000);
 }
 
 export async function updateProfileDefaults(profileId, defaults) {
     return patchJson(
         `/profiles/${encodeURIComponent(profileId)}/defaults`,
-        defaults || {}
+        defaults || {},
+        10000
     );
 }
 
-// convenient default export (matches your current imports)
+// convenient default export
 const api = {
     // discovery
     base,
