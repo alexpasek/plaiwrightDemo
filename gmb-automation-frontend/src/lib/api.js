@@ -35,10 +35,10 @@ async function discoverBaseUrl() {
                 if (j && j.ok) return b;
             }
         } catch (_) {
-            // keep trying other candidates
+            // keep trying
         }
     }
-    // Fallback (most common)
+    // Fallback
     return `http://localhost:4000`;
 }
 
@@ -124,14 +124,13 @@ export async function getProfiles() {
     return getJson("/profiles", 10000);
 }
 export async function generatePost(profileId) {
-    // Allow more time for OpenAI generation
     return getJson(
         `/generate-post-by-profile?profileId=${encodeURIComponent(profileId)}`,
         45000
     );
 }
 
-// Supports both old (profileId, postText) and new (payload) signatures
+// Unified postNow (old + new signatures)
 export async function postNow(
     profileIdOrPayload,
     postText,
@@ -199,28 +198,47 @@ export async function updateProfileDefaults(profileId, defaults) {
 
 // convenient default export
 const api = {
-    // discovery
     base,
     getApiBase,
-    // general
     getHealth,
     getVersion,
     getProfiles,
-    // compose/post
     generatePost,
     postNow,
     postNowAll,
-    // scheduler
     getSchedulerConfig,
     setSchedulerConfig,
     getSchedulerStatus,
     runSchedulerOnce,
     runSchedulerNow,
-    // history
     getPostHistory,
-    // misc
     postToGmb,
     updateProfileDefaults,
 };
 
 export default api;
+
+// --- Extra helpers ---
+
+export async function uploadPhoto(file, backendBase) {
+    const form = new FormData();
+    form.append("photo", file);
+    const r = await fetch(backendBase + "/upload", {
+        method: "POST",
+        body: form,
+    });
+    if (!r.ok) throw new Error("Upload failed: " + r.status);
+    return r.json(); // { url: "/uploads/xxx.jpg" }
+}
+
+// Optional direct post helper (explicit backendBase)
+export async function postNowDirect(opts, backendBase) {
+    const r = await fetch(backendBase + "/post-now", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(opts || {}),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error((data && data.error) || "HTTP " + r.status);
+    return data;
+}
