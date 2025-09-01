@@ -216,3 +216,53 @@ thead th {
     max-height: 420px;
     overflow: auto;
 }
+
+
+/* src/index.css (optional if no Tailwind) */
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.table th,
+.table td {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+}
+
+.table thead {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    z-index: 10;
+}
+
+.badge {
+    display: inline-flex;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 12px;
+}
+
+.badge-blue {
+    background: #e0edff;
+    color: #1d4ed8;
+}
+
+.badge-purple {
+    background: #efe7ff;
+    color: #6b21a8;
+}
+
+.badge-green {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.badge-yellow {
+    background: #fef9c3;
+    color: #854d0e;
+}

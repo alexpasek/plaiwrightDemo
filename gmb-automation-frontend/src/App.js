@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import api from "./lib/api";
 import "./App.css";
 import BackendBadge from "./components/BackendBadge";
-
+import PostsHistoryPanel from "./components/PostsHistoryPanel";
 const CTA_OPTIONS = [
   { value: "CALL_NOW", label: "Call now (tel:+)" },
   { value: "LEARN_MORE", label: "Learn more" },
@@ -510,19 +510,20 @@ export default function App() {
               </div>
             </form>
           </div>
-
           {/* History */}
-          <div className="card">
-            <h3>Posts History</h3>
-            <div className="row" style={{ marginBottom: 8 }}>
-              <button className="btn gray" onClick={() => refreshHistory()}>
-                Refresh
-              </button>
+           
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left controls */}
+            <div className="lg:col-span-1">
+              {/* keep your existing form / buttons here */}
             </div>
-            <div className="scroll">
-              <pre className="mono small" style={{ margin: 0 }}>
-                {hist ? JSON.stringify(hist, null, 2) : "No history yet."}
-              </pre>
+
+            {/* Preview area */}
+            <div className="lg:col-span-1">{/* your preview panel */}</div>
+
+            {/* New modern history */}
+            <div className="lg:col-span-1">
+              <PostsHistoryPanel />
             </div>
           </div>
         </div>

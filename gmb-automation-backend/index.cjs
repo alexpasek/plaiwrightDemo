@@ -131,6 +131,49 @@ function isValidPublicBase() {
 
 // Routes (uploads/photos)
 const uploadRoutes = require("./server/upload.cjs");
+// Pick a random *publicly reachable* file from /data/uploads that also exists at PUBLIC_BASE_URL/uploads
+function listLocalUploads() {
+    var uploadDir = path.join(__dirname, "data", "uploads");
+    if (!fs.existsSync(uploadDir)) return [];
+    return fs.readdirSync(uploadDir).filter(function(f) {
+        return !f.startsWith(".") && /\.(jpg|jpeg|png|webp)$/i.test(f);
+    });
+}
+
+// Try up to N random candidates; only return one that is confirmed public (200 + image/*) at PUBLIC_BASE_URL/uploads/<name>
+async function pickRandomPublicUpload(maxTries) {
+    if (!PUBLIC_BASE_URL || !/^https:\/\//i.test(PUBLIC_BASE_URL)) return null;
+    if (/your-domain\.com/i.test(PUBLIC_BASE_URL)) return null;
+    if (/localhost|127\.0\.0\.1/i.test(PUBLIC_BASE_URL)) return null;
+
+    var files = listLocalUploads();
+    if (files.length === 0) return null;
+
+    // Shuffle a copy
+    var shuffled = files.slice();
+    for (var i = shuffled.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = shuffled[i];
+        shuffled[i] = shuffled[j];
+        shuffled[j] = t;
+    }
+
+    var tries =
+        typeof maxTries === "number" && maxTries > 0 ?
+        maxTries :
+        Math.min(10, shuffled.length);
+    for (var k = 0; k < tries && k < shuffled.length; k++) {
+        var name = shuffled[k];
+        var publicUrl = PUBLIC_BASE_URL.replace(/\/+$/, "") + "/uploads/" + name;
+        try {
+            var probe = await probeImageUrl(publicUrl);
+            if (probe && probe.ok) {
+                return { url: "/uploads/" + name, caption: "" }; // keep relative; we’ll absolutize later
+            }
+        } catch (_) {}
+    }
+    return null;
+}
 
 // Google helpers
 const { oauth2Client, callBusinessProfileAPI } = require("./google-client.cjs");
@@ -750,9 +793,19 @@ async function postToGmb(body) {
     if (m1 && isHttpsImage(m1) && isPublicHttps(m1) && !isLocalHost(m1)) {
         chosenPhoto = { url: m1, caption: mediaCaptionInput || "" };
     } else {
-        // 2) Otherwise try a random photo from profile pool or UPLOADS_DIR
-        var candidate =
-            tryPickPhotoFromProfile(profile) || tryPickPhotoFromUploads();
+        // 2) Try profile pool
+        var candidate = tryPickPhotoFromProfile(profile);
+        // 3) Try PUBLIC_UPLOADS_CSV (if you use it)
+        if (!candidate) {
+            if (typeof pickFromPublicCsv === "function") {
+                candidate = pickFromPublicCsv();
+            }
+        }
+        // 4) Try a random *publicly-existing* local upload
+        if (!candidate) {
+            candidate = await pickRandomPublicUpload(10);
+        }
+
         if (candidate && candidate.url) {
             var m2 = makeAbsoluteUploadUrl(candidate.url);
             if (m2 && isHttpsImage(m2) && isPublicHttps(m2) && !isLocalHost(m2)) {
@@ -763,6 +816,7 @@ async function postToGmb(body) {
             }
         }
     }
+
     // --- Preflight the chosen image (skip if Google likely to reject)
     if (chosenPhoto && chosenPhoto.url) {
         try {
@@ -1054,6 +1108,27 @@ async function postToGmb(body) {
         }
 
         console.error("❌ Google Post Error:", detail);
+
+        // NEW: always record FINAL failure so history shows FAILED rows
+        try {
+            postsStore.append({
+                profileId: profileId,
+                accountId: profile.accountId,
+                locationId: profile.locationId,
+                summary: summary,
+                usedImage: null,
+                gmbPostId: "",
+                status: "FAILED",
+                createdAt: new Date().toISOString(),
+                cta:
+                    (payload &&
+                        payload.callToAction &&
+                        payload.callToAction.actionType) ||
+                    "",
+                mediaCount: 0,
+            });
+        } catch (_) {}
+
         throw new Error(
             typeof detail === "string" ? detail : JSON.stringify(detail)
         );
@@ -1201,6 +1276,8 @@ app.put("/scheduler/config", function(req, res) {
             SCHED_CFG.perProfileTimes = cleaned;
         }
         res.json({ ok: true, config: SCHED_CFG });
+        // NEW: apply new settings immediately
+        startSchedulerLoop();
     } catch (e) {
         res.status(400).json({ error: (e && e.message) || String(e) });
     }
@@ -1270,6 +1347,68 @@ app.post("/scheduler/run-now/:profileId", async function(req, res) {
         res.status(500).json({ error: (err && err.message) || String(err) });
     }
 });
+
+// ==================== SCHEDULER LOOP (NEW) ====================
+let _schedTimer = null;
+let _lastRunKey = null; // prevents multiple posts in the same minute per profile
+
+function hhmmToMinutes(hhmm) {
+    if (!/^\d{2}:\d{2}$/.test(String(hhmm || ""))) return null;
+    const [h, m] = String(hhmm).split(":").map(Number);
+    return h * 60 + m;
+}
+
+function nowMinutes() {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+}
+
+async function schedulerTick() {
+    if (!SCHED_CFG.enabled) return;
+
+    const current = nowMinutes();
+    const today = new Date().toISOString().slice(0, 10); // yyyy-mm-dd
+
+    for (let i = 0; i < PROFILES.length; i++) {
+        const p = PROFILES[i];
+        if (!p || !p.profileId) continue;
+
+        const hhmm =
+            (SCHED_CFG.perProfileTimes && SCHED_CFG.perProfileTimes[p.profileId]) ||
+            SCHED_CFG.defaultTime;
+        const target = hhmmToMinutes(hhmm);
+        if (target == null) continue;
+        if (target !== current) continue;
+
+        const runKey = `${today}:${p.profileId}:${target}`;
+        if (_lastRunKey === runKey) continue; // already ran this minute
+
+        try {
+            await postToGmb({ profileId: p.profileId, postText: "", bulk: false });
+            LAST_RUN_MAP[p.profileId] = new Date().toISOString();
+            _lastRunKey = runKey;
+            console.log("[scheduler] Posted to", p.businessName, "at", hhmm);
+        } catch (e) {
+            // postToGmb already appends FAILED to history
+            _lastRunKey = runKey;
+            console.error(
+                "[scheduler] Failed for",
+                p.businessName,
+                (e && e.message) || e
+            );
+        }
+    }
+}
+
+function startSchedulerLoop() {
+    if (_schedTimer) clearInterval(_schedTimer);
+    const tickMs = Math.max(15, Number(SCHED_CFG.tickSeconds || 30)) * 1000;
+    _schedTimer = setInterval(schedulerTick, tickMs);
+    console.log("[scheduler] loop started, tick", tickMs, "ms");
+}
+
+// kick it off on boot
+startSchedulerLoop();
 
 // ==================== POSTS HISTORY ====================
 app.get("/posts/history", function(req, res) {

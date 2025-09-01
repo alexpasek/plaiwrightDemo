@@ -1,45 +1,60 @@
+// server/posts-store.cjs  (CommonJS version)
 const fs = require("fs");
 const path = require("path");
 
-const FILE_PATH = path.join(__dirname, "..", "data", "posts.json");
+const FILE = path.join(process.cwd(), "data", "posts-history.json");
+let cache = null;
 
-function ensureFile() {
-    const dir = path.dirname(FILE_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    if (!fs.existsSync(FILE_PATH)) fs.writeFileSync(FILE_PATH, "[]");
+function load() {
+    if (cache) return cache;
+    try {
+        const raw = fs.readFileSync(FILE, "utf8");
+        const arr = JSON.parse(raw);
+        cache = Array.isArray(arr) ? arr : [];
+    } catch {
+        cache = [];
+    }
+    return cache;
+}
+
+function save() {
+    fs.mkdirSync(path.dirname(FILE), { recursive: true });
+    fs.writeFileSync(FILE, JSON.stringify(cache, null, 2));
+}
+
+/** Append a normalized record */
+function append(rec = {}) {
+    load();
+    const row = {
+        id: String(Date.now()),
+        createdAt: rec.createdAt || new Date().toISOString(),
+        locationId: rec.locationId || "",
+        profileId: rec.profileId || "",
+        profileName: rec.profileName || "",
+        summary: rec.summary || "",
+        mediaCount: Number(rec.mediaCount || 0),
+        usedImage: Number(rec.mediaCount || 0) > 0, // keeps your UI's "Photo" flag working
+        cta: rec.cta || "",
+        status: rec.status || "PENDING", // "POSTED" | "FAILED" | "PENDING"
+        gmbPostId: rec.gmbPostId || "",
+    };
+    cache.push(row);
+    if (cache.length > 1000) cache = cache.slice(-1000);
+    save();
+    return row;
 }
 
 function readAll() {
-    ensureFile();
-    try {
-        const arr = JSON.parse(fs.readFileSync(FILE_PATH, "utf8"));
-        return Array.isArray(arr) ? arr : [];
-    } catch {
-        return [];
-    }
+    load();
+    return cache.slice();
 }
 
-function readByProfile(profileId, limit) {
-    const all = readAll();
-    const out = [];
-    for (let i = all.length - 1; i >= 0; i--) {
-        const it = all[i];
-        if (it && it.profileId === profileId) {
-            out.push(it);
-            if (typeof limit === "number" && out.length >= limit) break;
-        }
-    }
-    return out;
+/** readLatest(profileId|null, limit) → oldest→newest (your UI reverses if needed) */
+function readLatest(profileId, limit = 50) {
+    load();
+    let arr = cache;
+    if (profileId) arr = arr.filter((x) => x && x.profileId === profileId);
+    return arr.slice(-limit);
 }
 
-function append(entry) {
-    const all = readAll();
-    all.push({
-        id: Date.now().toString(36),
-        createdAt: new Date().toISOString(),
-        ...entry,
-    });
-    fs.writeFileSync(FILE_PATH, JSON.stringify(all, null, 2));
-}
-
-module.exports = { readAll, readByProfile, append };
+module.exports = { append, readAll, readLatest };
